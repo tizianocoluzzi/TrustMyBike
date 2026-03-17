@@ -8,7 +8,8 @@ Aldo Bosco
 Alessandro Arellano Altuna
 ## System Description
 ### Goal
-Producing a smart bike that can evaluate the quality of the road and create a map that can be shared across devices
+Producing a smart bike that can evaluate the quality of the road and create a map that can be shared across devices, 
+allowing bikers to better understand road conditions in advance to decide the better path to go 
 ### Sensors
 - Accelerometer: MPU6050 with the goal to identify holes, speed
 - Gyrosope: evaluate slopeness of the street
@@ -37,12 +38,12 @@ From the collected data we aim to learn to classify the quality of the street an
 
 ### Communication
 
-
+```
 MPU -> ESP <-> Phone(enrich with GPS) -> Cloud (for building and sharing the map)
         ^
         |
       dynamo
-
+```
 ### Description
 ESP compute classification task to undestand street quality, communicates with the phone who enrich the obtained data.
 The obtained data are transimtted to the cloud to create this shared map.
