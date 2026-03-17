@@ -1,16 +1,40 @@
-# IoT_gorup_project
+# TrustMyBike
 project for IoT algorithm and Services course in Sapienza
+## Group
+Tiziano Coluzzi
+
+Aldo Bosco
+
+Alessandro Arellano Altuna
 ## System Description
 ### Goal
-Producing a smart bike that can evaluate teh quality of the road and create a shared mab that can be shared across devices
+Producing a smart bike that can evaluate the quality of the road and create a map that can be shared across devices
 ### Sensors
-- Accelerometer: MPU6050 with the goal to identify holes, speed, ...
-- gyrosope: evaluate slopeness of the street
-- (optional): integration with device GPS 
-- (more optional): camera to perform evaluation using images  
-### Energy harvesting
+- Accelerometer: MPU6050 with the goal to identify holes, speed
+- Gyrosope: evaluate slopeness of the street
+- Integration with phone GPS   
+### Power Source
 The project aims to be powered by a dynamo for the bike's wheel. Electrical characteristic: 6V, 3W of max power.
-## Design
+#### Power consumption
+| System | Current (max)| 
+| -- | -- |
+| accelerometer | 500 $\mu\text{A}$ |
+| gyroscope | 3.6 mA |
+| bluetooth | 130 mA |
+| ESP | 50 mA |
+| Total: | 187.1 mA |
+
+The dynamo can genrate 500 mA
+### Sampling
+The sampling frequency depends on speed and space.
+Given a medium wheel circumference of 70 cm, we define a bump as a hole with a 10 cm diamter.
+So the sampling frequency follows this relation: $F = \frac{2 * \text{speed}}{ \text{bump length}}$ 
+
+Obtained using Sampling theorem.
+
+### Learning
+From the collected data we aim to learn to classify the quality of the street and to detect hazards.
+
 ### Communication
 
 
@@ -22,12 +46,4 @@ MPU -> ESP <-> Phone(enrich with GPS) -> Cloud (for building and sharing the map
 ### Description
 ESP compute classification task to undestand street quality, communicates with the phone who enrich the obtained data.
 The obtained data are transimtted to the cloud to create this shared map.
-
-### What we need to determine:
-- frequency of sampling: idea it might depend on the speed
-- frequency of transmission: The frequency of transmission determine the enrichment so it needs to be fats enougn to build a street but no need to transmit every sample
-- data extraction: Which data do we care about? e.g. We can use sliding window to detect spikes 
-- model: what model should we use to perfom the learning task? supervised/unsupervised?
-- data: how do we collect data to have this samples? https://data.mendeley.com/datasets/3j9yh8znj4
-
 
