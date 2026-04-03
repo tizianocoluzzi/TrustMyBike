@@ -169,7 +169,7 @@ void calibrateMPU() {
 
   divSample(&mpuOffset, &sum, (float)calibrationSamples);
   mpuOffset.temp = 0.0f;
-
+  mpuOffset.az -= 9.81; //assuming acceleration on z-axis
   Serial.printf("Calibration offsets -> ax:%6.3f ay:%6.3f az:%6.3f gx:%6.3f gy:%6.3f gz:%6.3f\n",
                 mpuOffset.ax, mpuOffset.ay, mpuOffset.az,
                 mpuOffset.gx, mpuOffset.gy, mpuOffset.gz);
@@ -193,10 +193,12 @@ void filterTask(void* param){
   mpu_data_t data_mean = {0};
   int window_count = 0;
   int index = 0;
-  double theta_y = 0.0f;
-  double omega_y = 0.0f;
-  double theta_y_mean = 0.0f;
-  double omega_y_mean = 0.0f;
+  double pitch_y = 0.0f;
+  double roll_x = 0.0f;
+  double yaw_z = 0.0f;
+  double pitch_y_mean = 0.0f;
+  double roll_x_mean = 0.0f;
+  double yaw_z_mean = 0.0f;
   double vel_z = 0.0f;
   double vel_z_mean = 0.0f;
   double pos_z = 0.0f;
@@ -219,15 +221,28 @@ void filterTask(void* param){
     //Serial.printf(">mean_ax: %6.2f,mean_ay: %6.2f,mean_az: %6.2f, mean_temp:%6.2f, mean_gx: %6.2f, mean_gy: %6.2f, mean_gz:%6.2f\r\n",
     //              data_mean.ax, data_mean.ay, data_mean.az,
     //              data_mean.temp, data_mean.gx, data_mean.gy, data_mean.gz);
-    theta_y += ((double) data.gy) *dt;
-    theta_y_mean += ((double) data_mean.gy) * dt;
-    vel_z += ((double) data.az) * dt;
-    vel_z_mean += ((double) data_mean.az) * dt;
-    pos_z += ((double) data.az) * dt*dt*0.5 + vel_z * dt;
-    pos_z_mean += ((double) data_mean.az) * dt*dt*0.5 + vel_z_mean * dt;
-    Serial.printf(">theta_y:%f,theta_y_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
-            theta_y,theta_y_mean,vel_z,vel_z_mean,pos_z,pos_z_mean);
+    roll_x += ((double)data.gx) * dt;
+    pitch_y += ((double) data.gy) *dt;
+    yaw_z += ((double)data.gz) * dt;
+    roll_x_mean += ((double)data_mean.gx) * dt;
+    pitch_y_mean += ((double) data_mean.gy) * dt;
+    yaw_z_mean += ((double)data_mean.gz) * dt;
 
+    double gx = 9.81 * sin(pitch_y_mean);
+    double gy = -9.81 * cos(pitch_y_mean) * sin(roll_x_mean); 
+    double gz = 9.81 * cos(pitch_y_mean) * cos(roll_x_mean);
+    double decay = 0.995;//to limit drifting (clearly alters data so //TODO sensor fusion)
+    vel_z += ((double) data.az - gz) * dt;
+    vel_z_mean = vel_z_mean *decay +((double) data_mean.az - gz) * dt;
+    pos_z += ((double) data.az - gz) * dt*dt*0.5 + vel_z * dt;
+    pos_z_mean += ((double) data_mean.az - gz) * dt*dt*0.5 + vel_z_mean * dt;
+    Serial.printf(">roll_x:%f,roll_x_mean:%f,pitch_y:%f,pitch_y_mean:%f,yaw_z:%f,yaw_z_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
+                  roll_x, roll_x_mean,
+                  pitch_y, pitch_y_mean,
+                  yaw_z, yaw_z_mean,
+                  vel_z, vel_z_mean,
+                  pos_z, pos_z_mean);
+    // Serial.printf(">az:%f, gz_est:%f, diff:%f\r\n",data_mean.az, gz, data_mean.az - gz);
   }
 
 }
