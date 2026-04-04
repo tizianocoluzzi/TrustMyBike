@@ -2,8 +2,8 @@
 #include <Wire.h>
 #include "board.h"
 #include "sensors/mpu.h"
-#define WINDOW_SIZE 16
-#define SAMPLING_FREQUENCY 100
+#include "config.h"
+#include "filters/filters.h"
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
@@ -27,21 +27,14 @@ void gatherTask(void* param){
 
 void filterTask(void* param){
   mpu_data_t window[WINDOW_SIZE] = {0};
-  mpu_data_t running_sum = {0};
-  mpu_data_t data = {0};
-  mpu_data_t data_mean = {0};
+  mpu_data_t running_sum = {0.0f};
+  mpu_data_t data = {0.0f};
+  mpu_data_t data_mean = {0.0f};
   int window_count = 0;
   int index = 0;
-  double pitch_y = 0.0f;
-  double roll_x = 0.0f;
-  double yaw_z = 0.0f;
-  double pitch_y_mean = 0.0f;
-  double roll_x_mean = 0.0f;
-  double yaw_z_mean = 0.0f;
-  double vel_z = 0.0f;
-  double vel_z_mean = 0.0f;
-  double pos_z = 0.0f;
-  double pos_z_mean = 0.0f;
+  angles_t angle = {0.0f};
+  angles_t angle_mean = {0.0f};
+  velocity_t velocity = {0.0f};
   for(;;){
     xQueueReceive(filterQueue, &data, portMAX_DELAY);
 
@@ -60,28 +53,20 @@ void filterTask(void* param){
     //Serial.printf(">mean_ax: %6.2f,mean_ay: %6.2f,mean_az: %6.2f, mean_temp:%6.2f, mean_gx: %6.2f, mean_gy: %6.2f, mean_gz:%6.2f\r\n",
     //              data_mean.ax, data_mean.ay, data_mean.az,
     //              data_mean.temp, data_mean.gx, data_mean.gy, data_mean.gz);
-    roll_x += ((double)data.gx) * dt;
-    pitch_y += ((double) data.gy) *dt;
-    yaw_z += ((double)data.gz) * dt;
-    roll_x_mean += ((double)data_mean.gx) * dt;
-    pitch_y_mean += ((double) data_mean.gy) * dt;
-    yaw_z_mean += ((double)data_mean.gz) * dt;
 
-    double gx = 9.81 * sin(pitch_y_mean);
-    double gy = 9.81 * cos(pitch_y_mean) * sin(roll_x_mean); 
-    double gz = 9.81 * cos(pitch_y_mean) * cos(roll_x_mean);
-    double decay = 0.995;//to limit drifting (clearly alters data so //TODO sensor fusion)
-    vel_z += ((double) data.az - gz) * dt;
-    vel_z_mean = vel_z_mean *decay +((double) data_mean.az - gz) * dt;
-    pos_z += ((double) data.az - gz) * dt*dt*0.5 + vel_z * dt;
-    pos_z_mean += ((double) data_mean.az - gz) * dt*dt*0.5 + vel_z_mean * dt;
-    Serial.printf(">roll_x:%f,roll_x_mean:%f,pitch_y:%f,pitch_y_mean:%f,yaw_z:%f,yaw_z_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
-                  roll_x, roll_x_mean,
-                  pitch_y, pitch_y_mean,
-                  yaw_z, yaw_z_mean,
-                  vel_z, vel_z_mean,
-                  pos_z, pos_z_mean);
-    // Serial.printf(">az:%f, gz_est:%f, diff:%f\r\n",data_mean.az, gz, data_mean.az - gz);
+   integrate_angles(&data, &angle, dt);
+   integrate_angles(&data_mean, &angle_mean, dt);
+   integrate_velocity(&data_mean, &angle_mean, &velocity,dt);
+
+  Serial.printf(
+    ">angle_roll: %f,angle_pitch: %f,angle_yaw: %f,angle_mean_roll: %f,angle_mean_pitch: %f,angle_mean_yaw: %f,data_ax: %f,data_ay: %f,data_az: %f,data_temp: %f,data_gx: %f,data_gy: %f,data_gz: %f,data_mean_ax: %f,data_mean_ay: %f,data_mean_az: %f,data_mean_temp: %f,data_mean_gx: %f,data_mean_gy: %f,data_mean_gz: %f,velocity_z: %f\r\n",
+    angle.roll, angle.pitch, angle.yaw,
+    angle_mean.roll, angle_mean.pitch, angle_mean.yaw,
+    data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz,
+    data_mean.ax, data_mean.ay, data_mean.az, data_mean.temp, data_mean.gx, data_mean.gy, data_mean.gz,
+    velocity.vel_z
+  );
+
   }
 
 }
