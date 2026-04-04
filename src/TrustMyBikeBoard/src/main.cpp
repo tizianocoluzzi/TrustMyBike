@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include "board.h"
 #include "sensors/mpu.h"
+#include "ml/inference.h"
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 100
 
@@ -82,8 +83,30 @@ void filterTask(void* param){
                   vel_z, vel_z_mean,
                   pos_z, pos_z_mean);
     // Serial.printf(">az:%f, gz_est:%f, diff:%f\r\n",data_mean.az, gz, data_mean.az - gz);
+    
+    float z_to_send = data.az; 
+    xQueueSend(mlQueue, &z_to_send, 0); 
+
   }
 
+}
+
+void testMLTask(void* param) {
+    float normal_z = 9.81; // 1G, smooth road
+    float bump_z = 18.5;   // Huge spike from a pothole
+
+    for(;;) {
+        // Send normal road data for 2 seconds (100 samples at 20ms)
+        for(int i = 0; i < 100; i++) {
+            xQueueSend(mlQueue, &normal_z, portMAX_DELAY);
+            vTaskDelay(pdMS_TO_TICKS(20)); 
+        }
+
+        // Inject a massive bump!
+        Serial.println("--- INJECTING FAKE BUMP ---");
+        xQueueSend(mlQueue, &bump_z, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
 }
 
 void setup() {
@@ -91,14 +114,23 @@ void setup() {
   while (!Serial) delay(10);
 
   // FIX: Wire1.begin() MUST come before mpu_setup()
-  Wire1.begin(SDA_PIN, SCL_PIN);
-  Wire1.setClock(100000);
 
-  mpu_setup();
-  calibrateMPU();
-  filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
-  xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
-  xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
+  //TEMP REMOVAL FOR TESTING WITH testMLTask
+  //Wire1.begin(SDA_PIN, SCL_PIN);
+  //Wire1.setClock(100000);
+  //mpu_setup();
+  //calibrateMPU();
+  //filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
+  //TEMP REMOVAL FOR TESTING WITH testMLTask
+
+  mlQueue = xQueueCreate(10, sizeof(float));
+  setupML();
+  //FAKE DATA INJECTOR
+  xTaskCreatePinnedToCore(testMLTask, "testTask", 4096, NULL, 1, NULL, 1);
+
+  //TEMP REMOVAL FOR TESTING WITH testMLTask
+  //xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
+  //xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
 }
 
 
