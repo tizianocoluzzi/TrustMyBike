@@ -113,7 +113,7 @@ void testMLTask(void* param) {
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
-
+  
   // FIX: Wire1.begin() MUST come before mpu_setup()
 
   //TEMP REMOVAL FOR TESTING WITH testMLTask
@@ -121,7 +121,7 @@ void setup() {
   Wire1.setClock(100000);
   mpu_setup();
   calibrateMPU();
-  //filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
+  filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
   //TEMP REMOVAL FOR TESTING WITH testMLTask
 
   mlQueue = xQueueCreate(10, sizeof(float));

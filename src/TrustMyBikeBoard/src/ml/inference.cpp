@@ -20,6 +20,61 @@ static tflite::MicroErrorReporter error_reporter;
 // Define the queue here
 QueueHandle_t mlQueue;
 
+enum BumpState{
+    NORMAL,
+    INBUMP,
+    COOLDOWN
+    };
+    BumpState bumpState = NORMAL;
+    const float ENTER_TRESHOLD = 0.10f;
+    const float EXIT_TRESHOLD = 0.06f;
+    const int ENTER_COUNT_N = 3;
+    const int EXIT_COUNT_N = 3;
+    const TickType_t COOLDOWN_MS = pdMS_TO_TICKS(300);
+
+    int enterCount = 0;
+    int exitCount = 0;
+    TickType_t cooldownStart = 0;
+
+    void handleAnomalyScore(float anomaly_score, float raw_accel_z){
+        TickType_t now = xTaskGetTickCount();
+        switch (bumpState){
+        case NORMAL:
+            if(anomaly_score > ENTER_TRESHOLD){
+                enterCount++;
+                if(enterCount >= ENTER_COUNT_N){
+                    bumpState = INBUMP;
+                    enterCount = 0;
+                    exitCount = 0;
+                    Serial.printf("BUMP START");
+                }
+            } else {
+                enterCount = 0;
+            }
+        break;
+
+        case INBUMP:
+        if(anomaly_score < EXIT_TRESHOLD){
+            exitCount++;
+            if(exitCount >= EXIT_COUNT_N){
+                bumpState = COOLDOWN;
+                cooldownStart = now;
+                exitCount = 0;
+                Serial.printf("BUMP END");
+            }
+        } else {
+            exitCount = 0;
+        }
+        break;
+
+        case COOLDOWN:
+        if((now - cooldownStart) >= COOLDOWN_MS) {
+            bumpState = NORMAL;
+        }
+        break;
+        }
+    }
+
 void InferenceTask(void *parameter) {
     float raw_accel_z = 0.0f;
 
@@ -40,9 +95,11 @@ void InferenceTask(void *parameter) {
             // 3. Calculate Error
             float anomaly_score = abs(normalized_input - normalized_output);
 
+            handleAnomalyScore(anomaly_score, raw_accel_z);
+
             // 4. Trigger bump detection
             if (anomaly_score > ANOMALY_THRESHOLD) {
-                Serial.printf(">>> BUMP DETECTED! Z: %.2f | Score: %.3f <<<\n", raw_accel_z, anomaly_score);
+                //Serial.printf(">>> BUMP DETECTED! Z: %.2f | Score: %.3f <<<\n", raw_accel_z, anomaly_score);
             }
         }
     }
