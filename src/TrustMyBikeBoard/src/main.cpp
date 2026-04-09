@@ -1,19 +1,140 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 #include "board.h"
 #include "sensors/mpu.h"
 #include "ml/inference.h"
+#include "secrets.h" //password and SSID stored
+
+#ifndef WIFI_SSID
+#error "ssid not defined"
+#endif
+
+#ifndef WIFI_PASSWORD
+#error "password not defined"
+#endif
+
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 100
+#define MQTT_BUFFER_SIZE 512
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
 TaskHandle_t gatherTaskHandle;
 TaskHandle_t filterTaskHandle;
+TaskHandle_t MqttTaskHandle;
 
 QueueHandle_t filterQueue;
 
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
+const char *mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
+
+QueueHandle_t mqttQueue;
+
+void wifi_connect()
+{
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("\nWiFi connected");
+}
+
+void mqtt_reconnect()
+{
+    while (!mqttClient.connected())
+    {
+        Serial.print("Connecting to MQTT...");
+
+        if (mqttClient.connect("esp32_client"))
+        {
+            Serial.println("connected");
+        }
+        else
+        {
+            Serial.print("failed, rc=");
+            Serial.print(mqttClient.state());
+            Serial.println(" retrying...");
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+    }
+}
+
+
+void mqtt_task(void *pvParameters)
+{
+    mqttClient.setServer(mqtt_server, mqtt_port);
+
+    const char *topic = "tzn/data";
+
+    mpu_data_t data;
+    int sample_count = 0;
+
+    char payload[MQTT_BUFFER_SIZE];
+    int offset = 0;
+
+    for (;;)
+    {
+        if (!mqttClient.connected())
+        {
+            mqtt_reconnect();
+        }
+
+        mqttClient.loop();
+
+        if (xQueueReceive(mqttQueue, &data, pdMS_TO_TICKS(100)) == pdTRUE)
+        {
+          Serial.println("received data");
+            /* Append one sample to CSV */
+            int written = snprintf(
+                payload + offset,
+                MQTT_BUFFER_SIZE - offset,
+                "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+                data.ax, data.ay, data.az,
+                data.gx, data.gy, data.gz
+            );
+          Serial.printf("updating payload %s\n", payload);
+            /* Check for overflow */
+            if (written <= 0 || written >= (MQTT_BUFFER_SIZE - offset))
+            {
+                Serial.println("overflow, reset");
+                // Buffer full → reset safely
+                offset = 0;
+                sample_count = 0;
+                continue;
+            }
+
+            offset += written;
+            sample_count++;
+
+            /* When batch is ready */
+            if (sample_count >= 6)
+            {
+                /* Remove last '\n' (optional but cleaner) */
+                if (offset > 0)
+                {
+                    payload[offset - 1] = '\0';
+                }
+
+                mqttClient.publish(topic, payload);
+                Serial.println("sent data");
+
+                /* Reset buffer */
+                offset = 0;
+                sample_count = 0;
+                payload[0] = '\0';
+            }
+        }
+    }
+}
 
 void gatherTask(void* param){
   mpu_data_t data = {0};
@@ -22,7 +143,8 @@ void gatherTask(void* param){
    // Serial.printf(">ax: %6.2f,ay: %6.2f,az: %6.2f, temp:%6.2f, gx: %6.2f, gy: %6.2f, gz:%6.2f\r\n",
    //               data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
-    xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+    //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+    xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
     delay(sampling_interval);
   }
 }
@@ -115,24 +237,22 @@ void setup() {
   while (!Serial) delay(10);
   
   // FIX: Wire1.begin() MUST come before mpu_setup()
-
+  wifi_connect();
   //TEMP REMOVAL FOR TESTING WITH testMLTask
   Wire1.begin(SDA_PIN, SCL_PIN);
   Wire1.setClock(100000);
   mpu_setup();
   calibrateMPU();
+  
   filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
-  //TEMP REMOVAL FOR TESTING WITH testMLTask
-
-  mlQueue = xQueueCreate(10, sizeof(float));
-  //TEMP REMOVAL FOR TESTING WITH testMLTask
+  mqttQueue = xQueueCreate(10,sizeof(mpu_data_t));
+ // mlQueue = xQueueCreate(10, sizeof(float));
 
   xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
+  xTaskCreatePinnedToCore(mqtt_task,"mqttTask",4096, NULL, 1,  &MqttTaskHandle, 0);
   //xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
 
-  setupML();
-  //FAKE DATA INJECTOR
-  //xTaskCreatePinnedToCore(testMLTask, "testTask", 4096, NULL, 1, NULL, 1);
+  //setupML();
 
   }
 
