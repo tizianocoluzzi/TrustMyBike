@@ -5,6 +5,7 @@
 #include "board.h"
 #include "sensors/mpu.h"
 #include "ml/inference.h"
+#include "heltec_unofficial.h"
 #include "secrets.h" //password and SSID stored
 
 #ifndef WIFI_SSID
@@ -94,10 +95,12 @@ void mqtt_task(void *pvParameters)
         {
           Serial.println("received data");
             /* Append one sample to CSV */
+            unsigned long timestamp_ms = millis();
             int written = snprintf(
                 payload + offset,
                 MQTT_BUFFER_SIZE - offset,
-                "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+                "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+                timestamp_ms,
                 data.ax, data.ay, data.az,
                 data.gx, data.gy, data.gz
             );
@@ -235,13 +238,15 @@ void testMLTask(void* param) {
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
-  
+
   // FIX: Wire1.begin() MUST come before mpu_setup()
+
   wifi_connect();
   //TEMP REMOVAL FOR TESTING WITH testMLTask
   Wire1.begin(SDA_PIN, SCL_PIN);
   Wire1.setClock(100000);
   mpu_setup();
+
   calibrateMPU();
   
   filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
