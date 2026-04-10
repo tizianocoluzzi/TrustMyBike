@@ -48,3 +48,5 @@ MPU -> ESP <-> Phone(enrich with GPS) -> Cloud (for building and sharing the map
 ESP compute classification task to undestand street quality, communicates with the phone who enrich the obtained data.
 The obtained data are transimtted to the cloud to create this shared map.
 
+### Youtube link for demo
+https://youtube.com/@tizianocoluzzi?si=6QXLpHARwTKoehrB
