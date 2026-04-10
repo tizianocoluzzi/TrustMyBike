@@ -146,7 +146,7 @@ void gatherTask(void* param){
    // Serial.printf(">ax: %6.2f,ay: %6.2f,az: %6.2f, temp:%6.2f, gx: %6.2f, gy: %6.2f, gz:%6.2f\r\n",
    //               data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
-    //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+    xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
     xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
     delay(sampling_interval);
   }
@@ -251,13 +251,13 @@ void setup() {
   
   filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
   mqttQueue = xQueueCreate(10,sizeof(mpu_data_t));
- // mlQueue = xQueueCreate(10, sizeof(float));
+  mlQueue = xQueueCreate(10, sizeof(float));
 
   xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
   xTaskCreatePinnedToCore(mqtt_task,"mqttTask",4096, NULL, 1,  &MqttTaskHandle, 0);
   //xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
 
-  //setupML();
+  setupML();
 
   }
 
