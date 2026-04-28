@@ -3,11 +3,13 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <Adafruit_INA219.h>
+#include "sd/sd.h"
 #include "heltec.h"
 #include "board.h"
 #include "sensors/mpu.h"
 #include "ml/inference.h"
 #include "display/display.h"
+#include "sensors/hall.h"
 #include "secrets.h" //password and SSID stored
 
 #ifndef WIFI_SSID
@@ -33,11 +35,14 @@ QueueHandle_t filterQueue;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+HallSensor* hallSensor = nullptr;
+
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
 QueueHandle_t mqttQueue;
 Adafruit_INA219 ina;
+//SPIClass spi = SPIClass(SPI);
 void wifi_connect()
 {
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -146,14 +151,16 @@ void gatherTask(void* param){
   char buf[512];
   for(;;){
     readAccelGyro(&data);
-    Serial.printf(">ax: %6.2f,ay: %6.2f,az: %6.2f, temp:%6.2f, gx: %6.2f, gy: %6.2f, gz:%6.2f\r\n",
-                  data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz);
+    double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
+    snprintf(buf, sizeof(buf), ">ax:%6.2f,ay:%6.2f,az:%6.2f,temp:%6.2f,gx:%6.2f,gy:%6.2f,gz:%6.2f,volt:%6.2f,vel:%6.2f\r\n",
+                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V(), velocity);
+    //Serial.printf(buf);
+    sd::write_csv("/data.csv", buf);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
     //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
     //xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
     if( i % 100 == 0){
-    snprintf(buf, sizeof(buf), "volt:%6.2f,ay:%6.2f\n,az:%6.2f,temp:%6.2f,gx:%6.2f\n,gy:%6.2f,gz:%6.2f\nvolt:%6.2f",
-                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V());
+    snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f",ina.getBusVoltage_V(), velocity);
     display_message(buf);
   }
   i= (i+1) % 100;
@@ -261,6 +268,11 @@ void setup() {
     mpu_setup();
     display_message("calibrating mpu");
     calibrateMPU();
+
+    sd::init();
+
+    // Initialize hall sensor with 1 magnet and 15cm distance
+    hallSensor = new HallSensor(33, 150, 1);  // GPIO 33, 150mm (15cm), 1 magnet
 
     filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
     mqttQueue = xQueueCreate(10, sizeof(mpu_data_t));
