@@ -1,10 +1,10 @@
 #pragma once
 
 #include <Arduino.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include "sensors/mpu.h"
 
 extern QueueHandle_t mlQueue;
 
-void setupML(); 
-void InferenceTask(void *parameter);
+void setupML();
+float getLastRoadQuality();
+int getLastRoadClass();
