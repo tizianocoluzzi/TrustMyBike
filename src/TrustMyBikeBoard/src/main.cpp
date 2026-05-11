@@ -37,6 +37,9 @@ PubSubClient mqttClient(espClient);
 
 HallSensor* hallSensor = nullptr;
 
+// Counter-based filename for SD card
+char currentDataFile[32] = "/data_0.csv";
+
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
@@ -152,19 +155,19 @@ void gatherTask(void* param){
   for(;;){
     readAccelGyro(&data);
     double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
-    snprintf(buf, sizeof(buf), ">ax:%6.2f,ay:%6.2f,az:%6.2f,temp:%6.2f,gx:%6.2f,gy:%6.2f,gz:%6.2f,volt:%6.2f,vel:%6.2f\r\n",
-                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V(), velocity);
+    snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V(),ina.getCurrent_mA(), velocity);
     //Serial.printf(buf);
-    sd::write_csv("/data.csv", buf);
+    sd::write_csv(currentDataFile, buf);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
     //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
     //xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
-    if( i % 100 == 0){
-    snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f",ina.getBusVoltage_V(), velocity);
+    if( i  == 0){
+    snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\nax:%6.2f",ina.getBusVoltage_V(), velocity, data.az);
     display_message(buf);
   }
-  i= (i+1) % 100;
-    delay(sampling_interval);
+  i= (i+1) % 10;
+    vTaskDelay(pdMS_TO_TICKS(sampling_interval));
   }
 
 }
@@ -265,14 +268,30 @@ void setup() {
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);
     ina.begin(&Wire1);
+    ina.setCalibration_32V_2A();
     mpu_setup();
-    display_message("calibrating mpu");
-    calibrateMPU();
+    display_message("loading calibration");
+    
+    // Try to load calibration data from Preferences
+    if (!loadCalibrationFromPreferences()) {
+      // If load fails, perform calibration
+      display_message("calibrating mpu");
+      calibrateMPU();
+    }
 
     sd::init();
+    
+    // Read counter from SD card and create new filename for this boot
+    uint32_t fileCounter = sd::read_counter();
+    snprintf(currentDataFile, sizeof(currentDataFile), "/data_%lu.csv", fileCounter);
+    Serial.printf("Current session data file: %s\n", currentDataFile);
+    
+    // Increment counter for next boot
+    sd::increment_counter();
+    sd::write_csv(currentDataFile, "ax,ay,az,gx,gy,gz,temp,volt,curr,vel\n");
 
     // Initialize hall sensor with 1 magnet and 15cm distance
-    hallSensor = new HallSensor(33, 150, 1);  // GPIO 33, 150mm (15cm), 1 magnet
+    hallSensor = new HallSensor(33, 221, 1);  // GPIO 33, 150mm (15cm), 1 magnet
 
     filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
     mqttQueue = xQueueCreate(10, sizeof(mpu_data_t));
@@ -282,7 +301,7 @@ void setup() {
     //xTaskCreatePinnedToCore(mqtt_task, "mqttTask", 4096, NULL, 1, &MqttTaskHandle, 0);
     // xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
 
-    setupML();
+    //setupML();
 
   }
 

@@ -69,4 +69,48 @@ bool write_csv(const char *path, const char *line)
     file.close();
     return ok;
 }
+
+uint32_t read_counter()
+{
+    File file = SD.open("/counter.txt", FILE_READ);
+    if (!file)
+    {
+        Serial.println("Counter file not found, initializing to 0");
+        return 0;
+    }
+
+    char buffer[20];
+    int len = file.readBytes(buffer, sizeof(buffer) - 1);
+    file.close();
+
+    if (len <= 0)
+    {
+        Serial.println("Counter file is empty, initializing to 0");
+        return 0;
+    }
+
+    buffer[len] = '\0';
+    uint32_t counter = atoi(buffer);
+    Serial.printf("Read counter from SD: %lu\n", counter);
+    return counter;
+}
+
+bool increment_counter()
+{
+    uint32_t counter = read_counter() + 1;
+    
+    File file = SD.open("/counter.txt", FILE_WRITE);
+    if (!file)
+    {
+        Serial.println("Failed to open counter file for writing");
+        return false;
+    }
+
+    file.seek(0);
+    file.print(counter);
+    file.close();
+    
+    Serial.printf("Incremented counter to: %lu\n", counter);
+    return true;
+}
 }
