@@ -11,6 +11,10 @@
 #include "display/display.h"
 #include "sensors/hall.h"
 #include "secrets.h" //password and SSID stored
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 #ifndef WIFI_SSID
 #error "ssid not defined"
@@ -45,6 +49,77 @@ const int mqtt_port = 1883;
 
 QueueHandle_t mqttQueue;
 Adafruit_INA219 ina;
+
+// ── UUIDs ────────────────────────────────────────────────────────────────────
+#define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
+#define CHAR_TX_UUID        "12345678-1234-1234-1234-123456789ab0"  // Notify → phone
+#define CHAR_RX_UUID        "12345678-1234-1234-1234-123456789ab1"  // Write  ← phone
+
+// ── Globals ──────────────────────────────────────────────────────────────────
+static BLECharacteristic *pTxChar = nullptr;
+static bool               deviceConnected = false;
+static volatile bool      newDataAvailable = false;
+static String             receivedData = "";
+static SemaphoreHandle_t  dataMutex;
+
+// ── BLE Callbacks ─────────────────────────────────────────────────────────────
+class ServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer *pServer) override {
+        deviceConnected = true;
+        Serial.println("[BLE] Client connected");
+    }
+    void onDisconnect(BLEServer *pServer) override {
+        deviceConnected = false;
+        Serial.println("[BLE] Client disconnected — restarting advertising");
+        pServer->startAdvertising();
+    }
+};
+
+class RxCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pChar) override {
+        String value = pChar->getValue().c_str();
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+            receivedData = value;
+            newDataAvailable = true;
+            xSemaphoreGive(dataMutex);
+        }
+        Serial.printf("[BLE] Received: %s\n", value.c_str());
+    }
+};
+
+// ── BLE Init ─────────────────────────────────────────────────────────────────
+static void initBLE() {
+    BLEDevice::init("Heltec-V3");
+
+    BLEServer  *pServer  = BLEDevice::createServer();
+    pServer->setCallbacks(new ServerCallbacks());
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // TX characteristic — notify
+    pTxChar = pService->createCharacteristic(
+        CHAR_TX_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+    pTxChar->addDescriptor(new BLE2902());
+
+    // RX characteristic — write
+    BLECharacteristic *pRxChar = pService->createCharacteristic(
+        CHAR_RX_UUID,
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_WRITE_NR
+    );
+    pRxChar->setCallbacks(new RxCallbacks());
+
+    pService->start();
+
+    BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+    pAdv->addServiceUUID(SERVICE_UUID);
+    pAdv->setScanResponse(true);
+    BLEDevice::startAdvertising();
+
+    Serial.println("[BLE] Advertising started");
+}
 //SPIClass spi = SPIClass(SPI);
 void wifi_connect()
 {
@@ -255,6 +330,37 @@ void testMLTask(void* param) {
     }
 }
 
+// Task 1 — handles incoming BLE data
+void taskBLERx(void *pvParameters) {
+    for (;;) {
+        if (newDataAvailable) {
+            String data;
+            if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+                data = receivedData;
+                newDataAvailable = false;
+                xSemaphoreGive(dataMutex);
+            }
+            // Process received data here
+            Serial.printf("[RX Task] Processing: %s\n", data.c_str());
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// Task 2 — sends periodic notifications to connected client
+void taskBLETx(void *pvParameters) {
+    uint32_t counter = 0;
+    for (;;) {
+        if (deviceConnected && pTxChar) {
+            String msg = "Hello from Heltec #" + String(counter++);
+            pTxChar->setValue(msg.c_str());
+            pTxChar->notify();
+            Serial.printf("[TX Task] Sent: %s\n", msg.c_str());
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));  // send every 2 s
+    }
+}
+
 void setup() {
     Heltec.begin(true, false, true);
   Serial.begin(115200);
@@ -296,7 +402,14 @@ void setup() {
     filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
     mqttQueue = xQueueCreate(10, sizeof(mpu_data_t));
     mlQueue = xQueueCreate(10, sizeof(float));
+    dataMutex = xSemaphoreCreateMutex();
+    configASSERT(dataMutex);
 
+    initBLE();
+
+    // Pin tasks to specific cores (optional but good practice)
+    xTaskCreatePinnedToCore(taskBLERx, "BLE_RX", 4096, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(taskBLETx, "BLE_TX", 4096, nullptr, 1, nullptr, 1);
     xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
     //xTaskCreatePinnedToCore(mqtt_task, "mqttTask", 4096, NULL, 1, &MqttTaskHandle, 0);
     // xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
