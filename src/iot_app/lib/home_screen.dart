@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'app_state.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -9,6 +10,8 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // Collega questa schermata al "Cervello" (AppState)
     final state = context.watch<AppState>();
+    final serviceUuid = Guid("12345678-1234-1234-1234-123456789abc");
+    final characteristicUuid = Guid("12345678-1234-1234-1234-123456789ab0");
 
     return Scaffold(
       appBar: AppBar(
@@ -70,7 +73,11 @@ class HomeScreen extends StatelessWidget {
                     title: Text(result.device.advName),
                     subtitle: Text(result.device.remoteId.toString()),
                     trailing: ElevatedButton(
-                      onPressed: () => context.read<AppState>().connectToDevice(result.device),
+                      onPressed: () => context.read<AppState>().connectToDevice(
+                        result.device,
+                        serviceUuid: serviceUuid,
+                        characteristicUuid: characteristicUuid,
+                      ),
                       child: const Text("Connetti"),
                     ),
                   );

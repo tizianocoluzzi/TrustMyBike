@@ -15,6 +15,7 @@ class AppState extends ChangeNotifier {
   List<ScanResult> scanResults = [];
   BluetoothDevice? connectedDevice;
   String bleData = "Nessun dato";
+  StreamSubscription<List<int>>? _bleNotifySub;
 
   AppState() {
     _initGpsStream(); // Avvia il GPS appena l'app si apre
@@ -79,15 +80,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> connectToDevice(BluetoothDevice device) async {
+  Future<void> connectToDevice(
+    BluetoothDevice device, {
+    Guid? serviceUuid,
+    Guid? characteristicUuid,
+  }) async {
     try {
       await device.connect();
       connectedDevice = device;
       bleData = "Connesso all'ESP32!";
       notifyListeners();
-
-      // Mettiamo il codice per LEGGERE i dati qui (Discover Services)
-      // (Lo farai quando conoscerai gli UUID dell'ESP32 del tuo compagno)
+      if (serviceUuid != null && characteristicUuid != null) {
+        await startBleStringNotifications(
+          serviceUuid: serviceUuid,
+          characteristicUuid: characteristicUuid,
+        );
+      }
 
     } catch (e) {
       bleData = "Errore di connessione";
@@ -95,9 +103,44 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> startBleStringNotifications({
+    required Guid serviceUuid,
+    required Guid characteristicUuid,
+  }) async {
+    final device = connectedDevice;
+    if (device == null) {
+      bleData = "Nessun dispositivo connesso";
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final services = await device.discoverServices();
+      final service = services.firstWhere(
+        (s) => s.uuid == serviceUuid,
+        orElse: () => throw Exception("Servizio non trovato"),
+      );
+      final characteristic = service.characteristics.firstWhere(
+        (c) => c.uuid == characteristicUuid,
+        orElse: () => throw Exception("Caratteristica non trovata"),
+      );
+
+      await characteristic.setNotifyValue(true);
+      await _bleNotifySub?.cancel();
+      _bleNotifySub = characteristic.onValueReceived.listen((bytes) {
+        bleData = String.fromCharCodes(bytes);
+        notifyListeners();
+      });
+    } catch (e) {
+      bleData = "Errore ricezione BLE";
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
     _positionStream?.cancel(); // Pulisce la RAM quando l'app si chiude
+    _bleNotifySub?.cancel();
     super.dispose();
   }
 }
