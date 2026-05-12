@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
 #include <Adafruit_INA219.h>
+#ifdef SD
 #include "sd/sd.h"
+#endif
 #include "heltec.h"
 #include "board.h"
 #include "sensors/mpu.h"
@@ -26,36 +26,29 @@
 #endif
 
 
-#define TEST_MODE 1
+//#define TEST_MODE 1
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 50
-#define MQTT_BUFFER_SIZE 512
 
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
 TaskHandle_t gatherTaskHandle;
 TaskHandle_t filterTaskHandle;
-TaskHandle_t MqttTaskHandle;
 TaskHandle_t testMLTaskHandle;
 
 
 QueueHandle_t filterQueue;
 
 
-WiFiClient espClient;
-PubSubClient mqttClient(espClient);
 
 HallSensor* hallSensor = nullptr;
 
+#ifdef SD
 // Counter-based filename for SD card
 char currentDataFile[32] = "/data_0.csv";
+#endif
 
-const char *mqtt_server = "broker.hivemq.com";
-const int mqtt_port = 1883;
-
-
-QueueHandle_t mqttQueue;
 Adafruit_INA219 ina;
 
 // ── UUIDs ────────────────────────────────────────────────────────────────────
@@ -129,129 +122,6 @@ static void initBLE() {
     Serial.println("[BLE] Advertising started");
 }
 //SPIClass spi = SPIClass(SPI);
-void wifi_connect()
-{
-#if !TEST_MODE
-    //WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-
-    while (WiFi.status() != WL_CONNECTED)
-    {
-        delay(500);
-        Serial.print(".");
-    }
-
-
-    Serial.println("\nWiFi connected");
-#else
-    Serial.println("TEST_MODE enabled: WiFi disabled");
-#endif
-}
-
-
-void mqtt_reconnect()
-{
-#if !TEST_MODE
-    while (!mqttClient.connected())
-    {
-        Serial.print("Connecting to MQTT...");
-
-
-        if (mqttClient.connect("esp32_client"))
-        {
-            Serial.println("connected");
-        }
-        else
-        {
-            Serial.print("failed, rc=");
-            Serial.print(mqttClient.state());
-            Serial.println(" retrying...");
-            vTaskDelay(pdMS_TO_TICKS(2000));
-        }
-    }
-#endif
-}
-
-
-
-void mqtt_task(void *pvParameters)
-{
-#if !TEST_MODE
-    mqttClient.setServer(mqtt_server, mqtt_port);
-
-
-    const char *topic = "tzn/data";
-
-
-    mpu_data_t data;
-    int sample_count = 0;
-
-
-    char payload[MQTT_BUFFER_SIZE];
-    int offset = 0;
-
-
-    for (;;)
-    {
-        if (!mqttClient.connected())
-        {
-            mqtt_reconnect();
-        }
-
-
-        mqttClient.loop();
-
-
-        if (xQueueReceive(mqttQueue, &data, pdMS_TO_TICKS(100)) == pdTRUE)
-        {
-            /* Append one sample to CSV */
-            unsigned long timestamp_ms = millis();
-            int written = snprintf(
-                payload + offset,
-                MQTT_BUFFER_SIZE - offset,
-                "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
-                timestamp_ms,
-                data.ax, data.ay, data.az,
-                data.gx, data.gy, data.gz
-            );
-          //Serial.printf("updating payload %s\n", payload);
-            /* Check for overflow */
-            if (written <= 0 || written >= (MQTT_BUFFER_SIZE - offset))
-            {
-                Serial.println("overflow, reset");
-                // Buffer full → reset safely
-                offset = 0;
-                sample_count = 0;
-                continue;
-            }
-
-
-            offset += written;
-            sample_count++;
-
-
-            /* When batch is ready */
-            if (sample_count >= 6)
-            {
-                /* Remove last '\n' (optional but cleaner) */
-                if (offset > 0)
-                {
-                    payload[offset - 1] = '\0';
-                }
-
-
-                mqttClient.publish(topic, payload);
-
-
-                /* Reset buffer */
-                offset = 0;
-                sample_count = 0;
-                payload[0] = '\0';
-            }
-        }
-    }
-#endif
-}
 
 
 void gatherTask(void* param){
@@ -265,10 +135,9 @@ void gatherTask(void* param){
     snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
                  data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V(),ina.getCurrent_mA(), velocity);
     //Serial.printf(buf);
-    sd::write_csv(currentDataFile, buf);
+    //sd::write_csv(currentDataFile, buf);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
     //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
-    //xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
     if( i  == 0){
     snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\nax:%6.2f",ina.getBusVoltage_V(), velocity, data.az);
     display_message(buf);
@@ -440,12 +309,7 @@ void setup() {
     Heltec.begin(true, false, true);
   Serial.begin(115200);
   while (!Serial) delay(10);
-  // FIX: Wire1.begin() MUST come before mpu_setup()
-    display_init();
-   // display_message("connecting");
-   // wifi_connect();
-   // display_message("wifi connected");
-    // TEMP REMOVAL FOR TESTING WITH testMLTask
+
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);
     ina.begin(&Wire1);
@@ -460,16 +324,18 @@ void setup() {
       calibrateMPU();
     }
 
+  #ifdef SD
     sd::init();
-    
+
     // Read counter from SD card and create new filename for this boot
     uint32_t fileCounter = sd::read_counter();
     snprintf(currentDataFile, sizeof(currentDataFile), "/data_%lu.csv", fileCounter);
     Serial.printf("Current session data file: %s\n", currentDataFile);
-    
+
     // Increment counter for next boot
     sd::increment_counter();
     sd::write_csv(currentDataFile, "ax,ay,az,gx,gy,gz,temp,volt,curr,vel\n");
+  #endif
 
     // Initialize hall sensor with 1 magnet and 15cm distance
     hallSensor = new HallSensor(33, 221, 1);  // GPIO 33, 150mm (15cm), 1 magnet
@@ -477,52 +343,43 @@ void setup() {
 
   //wifi_connect();
   //TEMP REMOVAL FOR TESTING WITH testMLTask
-#if !TEST_MODE
+  #ifndef TEST_MODE
   Wire1.begin(SDA_PIN, SCL_PIN);
   Wire1.setClock(100000);
   mpu_setup();
 
 
-  calibrateMPU();
+  //calibrateMPU();
 #endif
   
   filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
-  mqttQueue = xQueueCreate(10,sizeof(mpu_data_t));
   mlQueue = xQueueCreate(64, sizeof(mpu_data_t));
 
 
 
-  setupML();
-
-#if TEST_MODE
-  xTaskCreatePinnedToCore(testMLTask, "testMLTask", 4096, NULL, 1, &testMLTaskHandle, 1);
-#else
-  //xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
-  xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
-  //xTaskCreatePinnedToCore(mqtt_task,"mqttTask",4096, NULL, 1,  &MqttTaskHandle, 0);
-  xTaskCreatePinnedToCore(mqtt_task,"mqttTask",4096, NULL, 1,  &MqttTaskHandle, 0);
-  //xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
-#endif
-
-
-    filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
-    mqttQueue = xQueueCreate(10, sizeof(mpu_data_t));
-    mlQueue = xQueueCreate(10, sizeof(float));
     dataMutex = xSemaphoreCreateMutex();
     configASSERT(dataMutex);
 
     initBLE();
 
-    // Pin tasks to specific cores (optional but good practice)
-    xTaskCreatePinnedToCore(taskBLERx, "BLE_RX", 4096, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(taskBLETx, "BLE_TX", 4096, nullptr, 1, nullptr, 1);
-    xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
-    //xTaskCreatePinnedToCore(mqtt_task, "mqttTask", 4096, NULL, 1, &MqttTaskHandle, 0);
-    // xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
+  setupML();
 
-    //setupML();
+#ifdef TEST_MODE
+  xTaskCreatePinnedToCore(testMLTask, "testMLTask", 4096, NULL, 1, &testMLTaskHandle, 1);
+#else
+  xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
+  //xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
+  xTaskCreatePinnedToCore(taskBLERx, "BLE_RX", 4096, nullptr, 1, nullptr, 1);
+  xTaskCreatePinnedToCore(taskBLETx, "BLE_TX", 4096, nullptr, 1, nullptr, 1);
+#endif
 
-  }
+  // Pin tasks to specific cores (optional but good practice)
+
+  xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
+  //  xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
+
+  // setupML();
+}
 
 
 
