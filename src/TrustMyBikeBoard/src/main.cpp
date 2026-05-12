@@ -2,12 +2,19 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <Adafruit_INA219.h>
+#include "sd/sd.h"
+#include "heltec.h"
 #include "board.h"
 #include "sensors/mpu.h"
 #include "ml/inference.h"
-#include "heltec_unofficial.h"
-//#include "secrets.h" //password and SSID stored
-
+#include "display/display.h"
+#include "sensors/hall.h"
+#include "secrets.h" //password and SSID stored
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 #ifndef WIFI_SSID
 //#error "ssid not defined"
@@ -39,14 +46,89 @@ QueueHandle_t filterQueue;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
+HallSensor* hallSensor = nullptr;
+
+// Counter-based filename for SD card
+char currentDataFile[32] = "/data_0.csv";
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
 
 QueueHandle_t mqttQueue;
+Adafruit_INA219 ina;
 
+// ── UUIDs ────────────────────────────────────────────────────────────────────
+#define SERVICE_UUID        "12345678-1234-1234-1234-123456789abc"
+#define CHAR_TX_UUID        "12345678-1234-1234-1234-123456789ab0"  // Notify → phone
+#define CHAR_RX_UUID        "12345678-1234-1234-1234-123456789ab1"  // Write  ← phone
 
+// ── Globals ──────────────────────────────────────────────────────────────────
+static BLECharacteristic *pTxChar = nullptr;
+static bool               deviceConnected = false;
+static volatile bool      newDataAvailable = false;
+static String             receivedData = "";
+static SemaphoreHandle_t  dataMutex;
+
+// ── BLE Callbacks ─────────────────────────────────────────────────────────────
+class ServerCallbacks : public BLEServerCallbacks {
+    void onConnect(BLEServer *pServer) override {
+        deviceConnected = true;
+        Serial.println("[BLE] Client connected");
+    }
+    void onDisconnect(BLEServer *pServer) override {
+        deviceConnected = false;
+        Serial.println("[BLE] Client disconnected — restarting advertising");
+        pServer->startAdvertising();
+    }
+};
+
+class RxCallbacks : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pChar) override {
+        String value = pChar->getValue().c_str();
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+            receivedData = value;
+            newDataAvailable = true;
+            xSemaphoreGive(dataMutex);
+        }
+        Serial.printf("[BLE] Received: %s\n", value.c_str());
+    }
+};
+
+// ── BLE Init ─────────────────────────────────────────────────────────────────
+static void initBLE() {
+    BLEDevice::init("Heltec-V3");
+
+    BLEServer  *pServer  = BLEDevice::createServer();
+    pServer->setCallbacks(new ServerCallbacks());
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // TX characteristic — notify
+    pTxChar = pService->createCharacteristic(
+        CHAR_TX_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY
+    );
+    pTxChar->addDescriptor(new BLE2902());
+
+    // RX characteristic — write
+    BLECharacteristic *pRxChar = pService->createCharacteristic(
+        CHAR_RX_UUID,
+        BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_WRITE_NR
+    );
+    pRxChar->setCallbacks(new RxCallbacks());
+
+    pService->start();
+
+    BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+    pAdv->addServiceUUID(SERVICE_UUID);
+    pAdv->setScanResponse(true);
+    BLEDevice::startAdvertising();
+
+    Serial.println("[BLE] Advertising started");
+}
+//SPIClass spi = SPIClass(SPI);
 void wifi_connect()
 {
 #if !TEST_MODE
@@ -122,7 +204,6 @@ void mqtt_task(void *pvParameters)
 
         if (xQueueReceive(mqttQueue, &data, pdMS_TO_TICKS(100)) == pdTRUE)
         {
-          Serial.println("received data");
             /* Append one sample to CSV */
             unsigned long timestamp_ms = millis();
             int written = snprintf(
@@ -133,7 +214,7 @@ void mqtt_task(void *pvParameters)
                 data.ax, data.ay, data.az,
                 data.gx, data.gy, data.gz
             );
-          Serial.printf("updating payload %s\n", payload);
+          //Serial.printf("updating payload %s\n", payload);
             /* Check for overflow */
             if (written <= 0 || written >= (MQTT_BUFFER_SIZE - offset))
             {
@@ -160,7 +241,6 @@ void mqtt_task(void *pvParameters)
 
 
                 mqttClient.publish(topic, payload);
-                Serial.println("sent data");
 
 
                 /* Reset buffer */
@@ -175,16 +255,28 @@ void mqtt_task(void *pvParameters)
 
 
 void gatherTask(void* param){
+    int i = 0;
   mpu_data_t data = {0};
+
+  char buf[512];
   for(;;){
     readAccelGyro(&data);
-   // Serial.printf(">ax: %6.2f,ay: %6.2f,az: %6.2f, temp:%6.2f, gx: %6.2f, gy: %6.2f, gz:%6.2f\r\n",
-   //                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz);
+    double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
+    snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+                 data.ax, data.ay, data.az, data.temp, data.gx, data.gy, data.gz, ina.getBusVoltage_V(),ina.getCurrent_mA(), velocity);
+    //Serial.printf(buf);
+    sd::write_csv(currentDataFile, buf);
     //xQueueSend(filterQueue, &data, portMAX_DELAY);
-    xQueueSend(mlQueue, &data, 0);
-    xQueueSend(mqttQueue, &data, 0);
+    //xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+    //xQueueSend(mqttQueue, &(data),  portMAX_DELAY);
+    if( i  == 0){
+    snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\nax:%6.2f",ina.getBusVoltage_V(), velocity, data.az);
+    display_message(buf);
+  }
+  i= (i+1) % 10;
     vTaskDelay(pdMS_TO_TICKS(sampling_interval));
   }
+
 }
 
 
@@ -243,12 +335,12 @@ void filterTask(void* param){
     vel_z_mean = vel_z_mean *decay +((double) data_mean.az - gz) * dt;
     pos_z += ((double) data.az - gz) * dt*dt*0.5 + vel_z * dt;
     pos_z_mean += ((double) data_mean.az - gz) * dt*dt*0.5 + vel_z_mean * dt;
-    Serial.printf(">roll_x:%f,roll_x_mean:%f,pitch_y:%f,pitch_y_mean:%f,yaw_z:%f,yaw_z_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
-                  roll_x, roll_x_mean,
-                  pitch_y, pitch_y_mean,
-                  yaw_z, yaw_z_mean,
-                  vel_z, vel_z_mean,
-                  pos_z, pos_z_mean);
+    //Serial.printf(">roll_x:%f,roll_x_mean:%f,pitch_y:%f,pitch_y_mean:%f,yaw_z:%f,yaw_z_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
+    //              roll_x, roll_x_mean,
+    //              pitch_y, pitch_y_mean,
+    //              yaw_z, yaw_z_mean,
+    //              vel_z, vel_z_mean,
+    //              pos_z, pos_z_mean);
     // Serial.printf(">az:%f, gz_est:%f, diff:%f\r\n",data_mean.az, gz, data_mean.az - gz);
     
     // Not needed anymore, directly sending raw data to ML task
@@ -313,12 +405,74 @@ void testMLTask(void* param) {
     }
 }
 
+// Task 1 — handles incoming BLE data
+void taskBLERx(void *pvParameters) {
+    for (;;) {
+        if (newDataAvailable) {
+            String data;
+            if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+                data = receivedData;
+                newDataAvailable = false;
+                xSemaphoreGive(dataMutex);
+            }
+            // Process received data here
+            Serial.printf("[RX Task] Processing: %s\n", data.c_str());
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+// Task 2 — sends periodic notifications to connected client
+void taskBLETx(void *pvParameters) {
+    uint32_t counter = 0;
+    for (;;) {
+        if (deviceConnected && pTxChar) {
+            String msg = "Hello from Heltec #" + String(counter++);
+            pTxChar->setValue(msg.c_str());
+            pTxChar->notify();
+            Serial.printf("[TX Task] Sent: %s\n", msg.c_str());
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));  // send every 2 s
+    }
+}
+
 void setup() {
+    Heltec.begin(true, false, true);
   Serial.begin(115200);
   while (!Serial) delay(10);
-
-
   // FIX: Wire1.begin() MUST come before mpu_setup()
+    display_init();
+   // display_message("connecting");
+   // wifi_connect();
+   // display_message("wifi connected");
+    // TEMP REMOVAL FOR TESTING WITH testMLTask
+    Wire1.begin(SDA_PIN, SCL_PIN);
+    Wire1.setClock(100000);
+    ina.begin(&Wire1);
+    ina.setCalibration_32V_2A();
+    mpu_setup();
+    display_message("loading calibration");
+    
+    // Try to load calibration data from Preferences
+    if (!loadCalibrationFromPreferences()) {
+      // If load fails, perform calibration
+      display_message("calibrating mpu");
+      calibrateMPU();
+    }
+
+    sd::init();
+    
+    // Read counter from SD card and create new filename for this boot
+    uint32_t fileCounter = sd::read_counter();
+    snprintf(currentDataFile, sizeof(currentDataFile), "/data_%lu.csv", fileCounter);
+    Serial.printf("Current session data file: %s\n", currentDataFile);
+    
+    // Increment counter for next boot
+    sd::increment_counter();
+    sd::write_csv(currentDataFile, "ax,ay,az,gx,gy,gz,temp,volt,curr,vel\n");
+
+    // Initialize hall sensor with 1 magnet and 15cm distance
+    hallSensor = new HallSensor(33, 221, 1);  // GPIO 33, 150mm (15cm), 1 magnet
 
 
   //wifi_connect();
@@ -351,6 +505,22 @@ void setup() {
 #endif
 
 
+    filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
+    mqttQueue = xQueueCreate(10, sizeof(mpu_data_t));
+    mlQueue = xQueueCreate(10, sizeof(float));
+    dataMutex = xSemaphoreCreateMutex();
+    configASSERT(dataMutex);
+
+    initBLE();
+
+    // Pin tasks to specific cores (optional but good practice)
+    xTaskCreatePinnedToCore(taskBLERx, "BLE_RX", 4096, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(taskBLETx, "BLE_TX", 4096, nullptr, 1, nullptr, 1);
+    xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1, &gatherTaskHandle, 1);
+    //xTaskCreatePinnedToCore(mqtt_task, "mqttTask", 4096, NULL, 1, &MqttTaskHandle, 0);
+    // xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1, &filterTaskHandle, 1);
+
+    //setupML();
 
   }
 

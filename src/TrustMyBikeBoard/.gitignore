@@ -3,5 +3,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+.vscode/
+.github
 src/ml/src.code-workspace
 include/secrets.h

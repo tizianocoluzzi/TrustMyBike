@@ -1,10 +1,14 @@
 #include "Wire.h"
 #include "board.h"
 #include "sensors/mpu.h"
+#include <Preferences.h>
 
 float accelScale = 16384.0;  // updated after reading register
 float gyroScale  = 131.0;    // updated after reading register
 mpu_data_t mpuOffset = {0};
+
+// Preferences namespace for calibration data
+Preferences preferences;
 
 
 
@@ -115,4 +119,51 @@ void calibrateMPU() {
   Serial.printf("Calibration offsets -> ax:%6.3f ay:%6.3f az:%6.3f gx:%6.3f gy:%6.3f gz:%6.3f\n",
                 mpuOffset.ax, mpuOffset.ay, mpuOffset.az,
                 mpuOffset.gx, mpuOffset.gy, mpuOffset.gz);
+  
+  // Save calibration data after successful calibration
+  saveCalibrationToPreferences();
+}
+
+bool loadCalibrationFromPreferences() {
+  preferences.begin("mpu_cal", true);  // true = read-only mode
+  
+  // Check if calibration data exists
+  if (!preferences.isKey("cal_valid")) {
+    preferences.end();
+    Serial.println("No calibration data found in Preferences");
+    return false;
+  }
+  
+  // Load calibration data
+  mpuOffset.ax = preferences.getFloat("ax", 0.0f);
+  mpuOffset.ay = preferences.getFloat("ay", 0.0f);
+  mpuOffset.az = preferences.getFloat("az", 0.0f);
+  mpuOffset.gx = preferences.getFloat("gx", 0.0f);
+  mpuOffset.gy = preferences.getFloat("gy", 0.0f);
+  mpuOffset.gz = preferences.getFloat("gz", 0.0f);
+  mpuOffset.temp = 0.0f;
+  
+  preferences.end();
+  
+  Serial.printf("Loaded calibration from Preferences -> ax:%6.3f ay:%6.3f az:%6.3f gx:%6.3f gy:%6.3f gz:%6.3f\n",
+                mpuOffset.ax, mpuOffset.ay, mpuOffset.az,
+                mpuOffset.gx, mpuOffset.gy, mpuOffset.gz);
+  return true;
+}
+
+void saveCalibrationToPreferences() {
+  preferences.begin("mpu_cal", false);  // false = read-write mode
+  
+  // Save calibration data
+  preferences.putFloat("ax", mpuOffset.ax);
+  preferences.putFloat("ay", mpuOffset.ay);
+  preferences.putFloat("az", mpuOffset.az);
+  preferences.putFloat("gx", mpuOffset.gx);
+  preferences.putFloat("gy", mpuOffset.gy);
+  preferences.putFloat("gz", mpuOffset.gz);
+  preferences.putBool("cal_valid", true);  // Mark calibration as valid
+  
+  preferences.end();
+  
+  Serial.println("Calibration data saved to Preferences");
 }
