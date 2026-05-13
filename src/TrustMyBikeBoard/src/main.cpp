@@ -27,6 +27,7 @@ TaskHandle_t filterTaskHandle;
 TaskHandle_t testMLTaskHandle;
 
 QueueHandle_t filterQueue;
+QueueHandle_t bleTxQueue;
 
 HallSensor *hallSensor = nullptr;
 
@@ -117,7 +118,6 @@ initBLE()
 
     Serial.println("[BLE] Advertising started");
 }
-// SPIClass spi = SPIClass(SPI);
 
 void gatherTask(void *param)
 {
@@ -135,7 +135,7 @@ void gatherTask(void *param)
         // Serial.printf(buf);
         // sd::write_csv(currentDataFile, buf);
         // xQueueSend(filterQueue, &data, portMAX_DELAY);
-        // xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+        xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
         if (i == 0)
         {
             snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\nax:%6.2f",
@@ -219,7 +219,7 @@ void filterTask(void *param)
         // xQueueSend(mlQueue, &z_to_send, 0);
     }
 }
-
+#ifdef TEST_MODE
 void testMLTask(void *param)
 {
     mpu_data_t sample = {0};
@@ -275,7 +275,7 @@ void testMLTask(void *param)
         }
     }
 }
-
+#endif //TEST_MODE
 // Task 1 — handles incoming BLE data
 void taskBLERx(void *pvParameters)
 {
@@ -320,7 +320,7 @@ void setup()
     Serial.begin(115200);
     while (!Serial)
         delay(10);
-
+#ifndef TEST_MODE //if in test mode sensors are not initialized
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);
     ina.begin(&Wire1);
@@ -336,7 +336,10 @@ void setup()
         calibrateMPU();
     }
 
-#ifdef SD
+    // Initialize hall sensor with 1 magnet and 15cm distance
+    hallSensor = new HallSensor(33, 221, 1); // GPIO 33, 150mm (15cm), 1 magnet
+#endif
+#ifdef SD //SD is for offline data gathering, not the project purpose, just for development
     sd::init();
 
     // Read counter from SD card and create new filename for this boot
@@ -350,22 +353,9 @@ void setup()
     sd::write_csv(currentDataFile, "ax,ay,az,gx,gy,gz,temp,volt,curr,vel\n");
 #endif
 
-    // Initialize hall sensor with 1 magnet and 15cm distance
-    hallSensor = new HallSensor(33, 221, 1); // GPIO 33, 150mm (15cm), 1 magnet
-
-// wifi_connect();
-// TEMP REMOVAL FOR TESTING WITH testMLTask
-#ifndef TEST_MODE
-    Wire1.begin(SDA_PIN, SCL_PIN);
-    Wire1.setClock(100000);
-    mpu_setup();
-
-    // calibrateMPU();
-#endif
-
     filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
     mlQueue = xQueueCreate(64, sizeof(mpu_data_t));
-
+    bleTxQueue = xQueueCreate(10, sizeof(mpu_data_t)); //TODO to be connected to the bletx task and to decide which data format to send
     dataMutex = xSemaphoreCreateMutex();
     configASSERT(dataMutex);
 
@@ -373,7 +363,7 @@ void setup()
 
     setupML();
 
-#ifdef TEST_MODE
+#ifdef TEST_MODE //creates just the testMLTask in case of test(data gen)
     xTaskCreatePinnedToCore(testMLTask, "testMLTask", 4096, NULL, 1,
                             &testMLTaskHandle, 1);
 #else
@@ -381,18 +371,9 @@ void setup()
                             &gatherTaskHandle, 1);
     // xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1,
     // &filterTaskHandle, 1);
+#endif
     xTaskCreatePinnedToCore(taskBLERx, "BLE_RX", 4096, nullptr, 1, nullptr, 1);
     xTaskCreatePinnedToCore(taskBLETx, "BLE_TX", 4096, nullptr, 1, nullptr, 1);
-#endif
-
-    // Pin tasks to specific cores (optional but good practice)
-
-    xTaskCreatePinnedToCore(gatherTask, "gatherTask", 4096, NULL, 1,
-                            &gatherTaskHandle, 1);
-    //  xTaskCreatePinnedToCore(filterTask, "filterTask", 4096, NULL, 1,
-    //  &filterTaskHandle, 1);
-
-    // setupML();
 }
 
 void loop()
