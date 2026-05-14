@@ -31,6 +31,12 @@ QueueHandle_t bleTxQueue;
 
 HallSensor *hallSensor = nullptr;
 
+typedef struct{
+    mpu_data_t mpu;
+    double vel;
+    double volt;
+} general_data;
+
 #ifdef SD
 // Counter-based filename for SD card
 char currentDataFile[32] = "/data_0.csv";
@@ -122,24 +128,27 @@ initBLE()
 void gatherTask(void *param)
 {
     int i = 0;
-    mpu_data_t data = {0};
-
+    general_data data;
+    mpu_data_t mpu_data;
     char buf[512];
     for (;;)
     {
-        readAccelGyro(&data);
+        readAccelGyro(&mpu_data);
         double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
-        snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data.ax,
-                 data.ay, data.az, data.temp, data.gx, data.gy, data.gz,
-                 ina.getBusVoltage_V(), ina.getCurrent_mA(), velocity);
+        memccpy(&data, &mpu_data,1, sizeof(mpu_data_t));
+        data.vel = velocity;
+        data.volt = ina.getBusVoltage_V();
+        snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data.mpu.ax,
+                 data.mpu.ay, data.mpu.az, data.mpu.temp, data.mpu.gx, data.mpu.gy, data.mpu.gz,
+                 data.volt,data.vel);
         // Serial.printf(buf);
         // sd::write_csv(currentDataFile, buf);
         // xQueueSend(filterQueue, &data, portMAX_DELAY);
-        xQueueSend(mlQueue, &(data.az), portMAX_DELAY);
+        xQueueSend(mlQueue,(void*) &mpu_data, portMAX_DELAY); //at the moment just mpu data
         if (i == 0)
         {
-            snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\nax:%6.2f",
-                     ina.getBusVoltage_V(), velocity, data.az);
+            snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\naz:%6.2f",
+                     data.vel, velocity, data.mpu.az);
             display_message(buf);
         }
         i = (i + 1) % 10;
