@@ -31,7 +31,7 @@ QueueHandle_t filterQueue;
 QueueHandle_t bleTxQueue;
 
 HallSensor *hallSensor = nullptr;
-
+BLEServer *pServer = nullptr;
 typedef struct{
     mpu_data_t mpu;
     double vel;
@@ -101,7 +101,7 @@ initBLE()
 {
     BLEDevice::init("Heltec-V3");
 
-    BLEServer *pServer = BLEDevice::createServer();
+    pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
 
     BLEService *pService = pServer->createService(SERVICE_UUID);
