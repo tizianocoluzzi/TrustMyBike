@@ -15,6 +15,7 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+#include "driver/rtc_io.h"
 
 // #define TEST_MODE 1
 #define WINDOW_SIZE 16
@@ -131,6 +132,7 @@ void gatherTask(void *param)
     general_data data;
     mpu_data_t mpu_data;
     char buf[512];
+    int cnt = 0;
     for (;;)
     {
         readAccelGyro(&mpu_data);
@@ -152,6 +154,31 @@ void gatherTask(void *param)
             display_message(buf);
         }
         i = (i + 1) % 10;
+        if(data.vel == 0)
+            cnt++;
+        else 
+            cnt = 0;
+        if(cnt >= 100){ //if stop for a second
+            Serial.println("[Sleep] Entering deep sleep");
+
+            if (pServer->getConnectedCount() > 0)
+            {
+                pServer->disconnect(0);
+                delay(300); // let disconnect packet transmit
+            }
+            gpio_reset_pin(HALL_GPIO);
+            gpio_set_direction(HALL_GPIO, GPIO_MODE_INPUT);
+            gpio_pullup_en(HALL_GPIO);
+            gpio_pulldown_dis(HALL_GPIO);
+
+            uint64_t pinMask = (1ULL << HALL_GPIO);
+            esp_sleep_enable_ext1_wakeup(pinMask, ESP_EXT1_WAKEUP_ANY_LOW);
+
+            Serial.println("[Sleep] Going to sleep now — short pin to GND to wake");
+            Serial.flush();
+            delay(100);
+            esp_deep_sleep_start();
+        }
         vTaskDelay(pdMS_TO_TICKS(sampling_interval));
     }
 }
@@ -329,6 +356,12 @@ void setup()
     Serial.begin(115200);
     while (!Serial)
         delay(10);
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause == ESP_SLEEP_WAKEUP_EXT1)
+    { // note: EXT1 not EXT0
+        uint64_t wakePin = esp_sleep_get_ext1_wakeup_status();
+        Serial.printf("[Wake] EXT1 triggered, pin mask: %llu\n", wakePin);
+    }
 #ifndef TEST_MODE //if in test mode sensors are not initialized
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);

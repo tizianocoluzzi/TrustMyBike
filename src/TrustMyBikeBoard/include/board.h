@@ -8,5 +8,5 @@
 #define MISO  6
 #define MOSI  5
 #define CS  4
-#define HALL_GPIO 33 
+#define HALL_GPIO GPIO_NUM_4 
 #define MPU_ADDR 0x68
