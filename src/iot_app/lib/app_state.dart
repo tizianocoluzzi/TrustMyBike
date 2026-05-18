@@ -26,8 +26,8 @@ class AppState extends ChangeNotifier {
   MqttServerClient? mqttClient;
   bool isMqttConnected = false;
 
-  final String mlQueueServiceUuid = "INSERISCI-UUID-SERVIZIO-QUI";
-  final String mlQueueCharacteristicUuid = "INSERISCI-UUID-CARATTERISTICA-QUI";
+  final String mlQueueServiceUuid = "12345678-1234-1234-1234-123456789abc";
+  final String mlQueueCharacteristicUuid = "12345678-1234-1234-1234-123456789ab0";
 
   AppState() {
     _initGpsStream();
@@ -97,13 +97,6 @@ class AppState extends ChangeNotifier {
       connectedDevice = device;
       bleData = "Connesso all'ESP32!";
       notifyListeners();
-<<<<<<< HEAD
-      if (serviceUuid != null && characteristicUuid != null) {
-        await startBleStringNotifications(
-          serviceUuid: serviceUuid,
-          characteristicUuid: characteristicUuid,
-        );
-=======
 
       device.connectionState.listen((BluetoothConnectionState state) async {
         if (state == BluetoothConnectionState.disconnected) {
@@ -166,7 +159,6 @@ class AppState extends ChangeNotifier {
             }
           }
         }
->>>>>>> 7809eec (Aggiunta logica MQTT Batching e salvataggio RoadPoint in app_state)
       }
 
     } catch (e) {
@@ -211,12 +203,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
-<<<<<<< HEAD
-    _positionStream?.cancel(); // Pulisce la RAM quando l'app si chiude
-    _bleNotifySub?.cancel();
-=======
     _positionStream?.cancel(); 
->>>>>>> 7809eec (Aggiunta logica MQTT Batching e salvataggio RoadPoint in app_state)
     super.dispose();
   }
 

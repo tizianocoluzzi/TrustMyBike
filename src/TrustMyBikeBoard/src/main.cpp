@@ -8,7 +8,7 @@
 #include "display/display.h"
 #include "heltec.h"
 #include "ml/inference.h"
-#include "secrets.h" //password and SSID stored
+//#include "secrets.h" //password and SSID stored
 #include "sensors/hall.h"
 #include "sensors/mpu.h"
 #include <BLE2902.h>
@@ -131,6 +131,7 @@ void gatherTask(void *param)
     int i = 0;
     general_data data;
     mpu_data_t mpu_data;
+    ml_sample_t ml_sample;
     char buf[512];
     int cnt = 0;
     for (;;)
@@ -146,7 +147,9 @@ void gatherTask(void *param)
         // Serial.printf(buf);
         // sd::write_csv(currentDataFile, buf);
         // xQueueSend(filterQueue, &data, portMAX_DELAY);
-        xQueueSend(mlQueue,(void*) &mpu_data, portMAX_DELAY); //at the moment just mpu data
+        ml_sample.mpu = mpu_data;
+        ml_sample.vel = (float)velocity;
+        xQueueSend(mlQueue, (void*) &ml_sample, portMAX_DELAY); //at the moment just mpu data
         if (i == 0)
         {
             snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\naz:%6.2f",
@@ -222,9 +225,9 @@ void filterTask(void *param)
 
         // Serial.printf(">mean_ax: %6.2f,mean_ay: %6.2f,mean_az: %6.2f,
         // mean_temp:%6.2f, mean_gx: %6.2f, mean_gy: %6.2f, mean_gz:%6.2f\r\n",
-        //               data_mean.ax, data_mean.ay, data_mean.az,
-        //               data_mean.temp, data_mean.gx, data_mean.gy,
-        //               data_mean.gz);
+        //                data_mean.ax, data_mean.ay, data_mean.az,
+        //                data_mean.temp, data_mean.gx, data_mean.gy,
+        //                data_mean.gz);
         roll_x += ((double)data.gx) * dt;
         pitch_y += ((double)data.gy) * dt;
         yaw_z += ((double)data.gz) * dt;
@@ -242,11 +245,11 @@ void filterTask(void *param)
         pos_z += ((double)data.az - gz) * dt * dt * 0.5 + vel_z * dt;
         pos_z_mean += ((double)data_mean.az - gz) * dt * dt * 0.5 + vel_z_mean * dt;
         // Serial.printf(">roll_x:%f,roll_x_mean:%f,pitch_y:%f,pitch_y_mean:%f,yaw_z:%f,yaw_z_mean:%f,vel_z:%f,vel_z_mean:%f,pos_z:%f,pos_z_mean:%f\r\n",
-        //               roll_x, roll_x_mean,
-        //               pitch_y, pitch_y_mean,
-        //               yaw_z, yaw_z_mean,
-        //               vel_z, vel_z_mean,
-        //               pos_z, pos_z_mean);
+        //                roll_x, roll_x_mean,
+        //                pitch_y, pitch_y_mean,
+        //                yaw_z, yaw_z_mean,
+        //                vel_z, vel_z_mean,
+        //                pos_z, pos_z_mean);
         //  Serial.printf(">az:%f, gz_est:%f, diff:%f\r\n",data_mean.az, gz,
         //  data_mean.az - gz);
 
@@ -259,6 +262,7 @@ void filterTask(void *param)
 void testMLTask(void *param)
 {
     mpu_data_t sample = {0};
+    ml_sample_t ml_sample = {0};
     TickType_t lastWake = xTaskGetTickCount();
 
     for (;;)
@@ -275,7 +279,10 @@ void testMLTask(void *param)
             sample.gz = 0.01f * cosf(i * 0.16f);
             sample.temp = 0.0f;
 
-            xQueueSend(mlQueue, &sample, portMAX_DELAY);
+
+            ml_sample.mpu = sample;
+            ml_sample.vel = 15.0f;
+            xQueueSend(mlQueue, &ml_sample, portMAX_DELAY);
             vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(20));
         }
 
@@ -306,7 +313,10 @@ void testMLTask(void *param)
                 sample.gy += 0.18f;
             }
 
-            xQueueSend(mlQueue, &sample, portMAX_DELAY);
+
+            ml_sample.mpu = sample;
+            ml_sample.vel = 15.0f;
+            xQueueSend(mlQueue, &ml_sample, portMAX_DELAY);
             vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(20));
         }
     }
@@ -336,16 +346,20 @@ void taskBLERx(void *pvParameters)
 // Task 2 — sends periodic notifications to connected client
 void taskBLETx(void *pvParameters)
 {
-    uint32_t counter = 0;
     for (;;)
     {
         if (deviceConnected && pTxChar)
         {
-            String msg = "Hello from Heltec #" + String(counter++);
+            int score = getLastRoadClass();   // current class: 1..5
+            if (score < 1) score = 1;
+            if (score > 5) score = 5;
+
+            String msg = String(score);
             pTxChar->setValue(msg.c_str());
             pTxChar->notify();
-            Serial.printf("[TX Task] Sent: %s\n", msg.c_str());
+            Serial.printf("[TX Task] Sent road quality: %s\n", msg.c_str());
         }
+
         vTaskDelay(pdMS_TO_TICKS(2000)); // send every 2 s
     }
 }
@@ -396,7 +410,7 @@ void setup()
 #endif
 
     filterQueue = xQueueCreate(WINDOW_SIZE * 2, sizeof(mpu_data_t));
-    mlQueue = xQueueCreate(64, sizeof(mpu_data_t));
+    mlQueue = xQueueCreate(64, sizeof(ml_sample_t));
     bleTxQueue = xQueueCreate(10, sizeof(mpu_data_t)); //TODO to be connected to the bletx task and to decide which data format to send
     dataMutex = xSemaphoreCreateMutex();
     configASSERT(dataMutex);
