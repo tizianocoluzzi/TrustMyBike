@@ -76,14 +76,14 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     // Collega questa schermata al "Cervello" (AppState)
     final state = context.watch<AppState>();
-    final serviceUuid = Guid("12345678-1234-1234-1234-123456789abc");
-    final characteristicUuid = Guid("12345678-1234-1234-1234-123456789ab0");
+    
+    // RIMOSSI i due Guid (serviceUuid e characteristicUuid) che causavano l'errore
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("TrustMyBike Dashboard"), // Un titolo più professionale
+        title: const Text("TrustMyBike Dashboard"), 
         backgroundColor: Colors.blueAccent,
-        foregroundColor: Colors.white, // Rende il titolo bianco e ben leggibile
+        foregroundColor: Colors.white, 
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -114,7 +114,6 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 16),
 
             // --- 2. INDICATORE QUALITÀ STRADA ---
-            // ECCOLO QUI! Ora è connesso al cervello dell'app (state.roadQualityScore)
             _buildRoadQualityIndicator(state.roadQualityScore),
 
             const SizedBox(height: 20),
@@ -146,11 +145,8 @@ class HomeScreen extends StatelessWidget {
                     title: Text(result.device.advName),
                     subtitle: Text(result.device.remoteId.toString()),
                     trailing: ElevatedButton(
-                      onPressed: () => context.read<AppState>().connectToDevice(
-                        result.device,
-                        serviceUuid: serviceUuid,
-                        characteristicUuid: characteristicUuid,
-                      ),
+                      // CODICE CORRETTO: Passiamo solo result.device senza i vecchi parametri!
+                      onPressed: () => context.read<AppState>().connectToDevice(result.device),
                       child: const Text("Connetti"),
                     ),
                   );

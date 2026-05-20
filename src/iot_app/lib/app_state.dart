@@ -20,7 +20,7 @@ class AppState extends ChangeNotifier {
   List<ScanResult> scanResults = [];
   BluetoothDevice? connectedDevice;
   String bleData = "Nessun dato";
-  StreamSubscription<List<int>>? _bleNotifySub;
+  StreamSubscription<List<int>>? _bleDataSubscription; // Unico listener necessario
 
   // --- VARIABILI MQTT ---
   MqttServerClient? mqttClient;
@@ -87,35 +87,42 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> connectToDevice(
-    BluetoothDevice device, {
-    Guid? serviceUuid,
-    Guid? characteristicUuid,
-  }) async {
+ Future<void> connectToDevice(BluetoothDevice device) async {
     try {
-      await device.connect();
+      // 1. Connessione iniziale (attiviamo l'autoConnect fin da subito)
+      await device.connect(autoConnect: true);
       connectedDevice = device;
-      bleData = "Connesso all'ESP32!";
-      notifyListeners();
 
+      // =======================================================
+      // 2. CANE DA GUARDIA PER IL DEEP SLEEP (Auto-Reconnect)
+      // =======================================================
       device.connectionState.listen((BluetoothConnectionState state) async {
         if (state == BluetoothConnectionState.disconnected) {
-          print(" ESP32 andato in Deep Sleep o perso! In attesa del risveglio...");
+          print(" ESP32 in Deep Sleep o disconnesso...");
           bleData = "ESP in Deep Sleep. Attesa...";
           notifyListeners();
 
-          try {
-            await device.connect(autoConnect: true);
-            bleData = "Riconnesso dopo il Deep Sleep!";
-            notifyListeners();
-          } catch (e) {
-            print("Errore durante la riconnessione: $e");
-          }
         } else if (state == BluetoothConnectionState.connected) {
-          print(" Connessione BLE stabile.");
+          print(" Connessione BLE stabilita. Configuro i sensori...");
+          bleData = "Connesso! Riattivazione sensori...";
+          notifyListeners();
+
+          // Riaccendiamo le notifiche a ogni risveglio!
+          await _setupNotifications(device);
         }
       });
 
+    } catch (e) {
+      bleData = "Errore di connessione: $e";
+      notifyListeners();
+    }
+  }
+
+  // =======================================================
+  // 3. FUNZIONE PER ACCENDERE L'INTERRUTTORE DEI DATI
+  // =======================================================
+  Future<void> _setupNotifications(BluetoothDevice device) async {
+    try {
       List<BluetoothService> services = await device.discoverServices();
       
       for (BluetoothService service in services) {
@@ -123,10 +130,16 @@ class AppState extends ChangeNotifier {
           for (BluetoothCharacteristic characteristic in service.characteristics) {
             
             if (characteristic.uuid.toString() == mlQueueCharacteristicUuid) {
-              await characteristic.setNotifyValue(true);
-              print(" In ascolto della coda ML...");
               
-              characteristic.lastValueStream.listen((List<int> value) {
+              // 1. Riaccendiamo le notifiche
+              await characteristic.setNotifyValue(true);
+              print(" Iscrizione alla coda ML completata.");
+              
+              // 2. Stacchiamo le vecchie orecchie se c'erano (evita dati sdoppiati)
+              await _bleDataSubscription?.cancel();
+              
+              // 3. Ascoltiamo il nuovo flusso di dati
+              _bleDataSubscription = characteristic.lastValueStream.listen((List<int> value) {
                 if (value.isEmpty) return;
 
                 String stringaRicevuta = String.fromCharCodes(value).trim();
@@ -134,7 +147,7 @@ class AppState extends ChangeNotifier {
                 
                 if (parsedScore != null && parsedScore >= 1 && parsedScore <= 5) {
                   roadQualityScore = parsedScore;
-                  bleData = "Qualità Strada ricevuta: $roadQualityScore/5";
+                  bleData = "Qualità Strada: $roadQualityScore/5";
                   
                   RoadPoint nuovoPunto = RoadPoint(
                     latitude: latitude,
@@ -144,9 +157,8 @@ class AppState extends ChangeNotifier {
                   );
 
                   roadHistory.add(nuovoPunto);
-                  print("📍 Punto accumulato (Totale: ${roadHistory.length}/10)");
+                  print(" Punto accumulato (Totale: ${roadHistory.length}/10)");
 
-                  // VERO BATCHING: Appena arrivo a 10, chiamo la nuova funzione
                   if (roadHistory.length >= 10) {
                     publishRoadPointsBatch();
                   }
@@ -160,50 +172,16 @@ class AppState extends ChangeNotifier {
           }
         }
       }
-
     } catch (e) {
-      bleData = "Errore di connessione: $e";
-      notifyListeners();
+      print("Errore durante il setup delle notifiche: $e");
     }
   }
 
-  Future<void> startBleStringNotifications({
-    required Guid serviceUuid,
-    required Guid characteristicUuid,
-  }) async {
-    final device = connectedDevice;
-    if (device == null) {
-      bleData = "Nessun dispositivo connesso";
-      notifyListeners();
-      return;
-    }
-
-    try {
-      final services = await device.discoverServices();
-      final service = services.firstWhere(
-        (s) => s.uuid == serviceUuid,
-        orElse: () => throw Exception("Servizio non trovato"),
-      );
-      final characteristic = service.characteristics.firstWhere(
-        (c) => c.uuid == characteristicUuid,
-        orElse: () => throw Exception("Caratteristica non trovata"),
-      );
-
-      await characteristic.setNotifyValue(true);
-      await _bleNotifySub?.cancel();
-      _bleNotifySub = characteristic.onValueReceived.listen((bytes) {
-        bleData = String.fromCharCodes(bytes);
-        notifyListeners();
-      });
-    } catch (e) {
-      bleData = "Errore ricezione BLE";
-      notifyListeners();
-    }
-  }
-
+  // Un solo metodo dispose per pulire tutto quando l'app si chiude
   @override
   void dispose() {
     _positionStream?.cancel(); 
+    _bleDataSubscription?.cancel(); 
     super.dispose();
   }
 
@@ -227,7 +205,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  // NUOVA FUNZIONE: Prende tutta la lista e la manda come UN SOLO messaggio
+  // Prende tutta la lista e la manda come UN SOLO messaggio
   void publishRoadPointsBatch() {
     if (mqttClient == null || mqttClient!.connectionStatus!.state != MqttConnectionState.connected) {
       print(" MQTT non connesso. I dati rimangono nel buffer locale (${roadHistory.length} punti).");
