@@ -23,6 +23,8 @@
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
+
+uint32_t start_time;
 TaskHandle_t gatherTaskHandle;
 TaskHandle_t filterTaskHandle;
 TaskHandle_t testMLTaskHandle;
@@ -67,7 +69,8 @@ class ServerCallbacks : public BLEServerCallbacks
     onConnect(BLEServer *pServer) override
     {
         deviceConnected = true;
-        Serial.println("[BLE] Client connected");
+
+        Serial.printf("[BLE] Client connected from start in time: %f ms\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
     }
     void
     onDisconnect(BLEServer *pServer) override
@@ -152,8 +155,10 @@ void gatherTask(void *param)
         xQueueSend(mlQueue, (void*) &ml_sample, portMAX_DELAY); //at the moment just mpu data
         if (i == 0)
         {
-            snprintf(buf, sizeof(buf), "volt:%6.2f,vel:%6.2f\naz:%6.2f",
-                     data.vel, velocity, data.mpu.az);
+            snprintf(buf, sizeof(buf),
+                     "volt:%6.2f vel:%6.2f\naz:%6.2f road:%d",
+                     data.volt, velocity, data.mpu.az,
+                     g_road_class_display);
             display_message(buf);
         }
         i = (i + 1) % 10;
@@ -161,7 +166,7 @@ void gatherTask(void *param)
             cnt++;
         else 
             cnt = 0;
-        if(cnt >= 100){ //if stop for a second
+        if(cnt >= 1000){ //if stop for 20 second
             Serial.println("[Sleep] Entering deep sleep");
 
             if (pServer->getConnectedCount() > 0)
@@ -169,10 +174,11 @@ void gatherTask(void *param)
                 pServer->disconnect(0);
                 delay(300); // let disconnect packet transmit
             }
-            gpio_reset_pin(HALL_GPIO);
-            gpio_set_direction(HALL_GPIO, GPIO_MODE_INPUT);
-            gpio_pullup_en(HALL_GPIO);
-            gpio_pulldown_dis(HALL_GPIO);
+
+           // gpio_reset_pin(HALL_GPIO);
+           // gpio_set_direction(HALL_GPIO, GPIO_MODE_INPUT);
+           // gpio_pullup_en(HALL_GPIO);
+           // gpio_pulldown_dis(HALL_GPIO);
 
             uint64_t pinMask = (1ULL << HALL_GPIO);
             esp_sleep_enable_ext1_wakeup(pinMask, ESP_EXT1_WAKEUP_ANY_LOW);
@@ -370,6 +376,7 @@ void setup()
     Serial.begin(115200);
     while (!Serial)
         delay(10);
+    start_time = esp_timer_get_time();
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     if (cause == ESP_SLEEP_WAKEUP_EXT1)
     { // note: EXT1 not EXT0
@@ -393,7 +400,7 @@ void setup()
     }
 
     // Initialize hall sensor with 1 magnet and 15cm distance
-    hallSensor = new HallSensor(33, 221, 1); // GPIO 33, 150mm (15cm), 1 magnet
+    hallSensor = new HallSensor(HALL_GPIO, 221, 1); // GPIO 33, 150mm (15cm), 1 magnet
 #endif
 #ifdef SD //SD is for offline data gathering, not the project purpose, just for development
     sd::init();

@@ -287,6 +287,7 @@ void updatePrediction(const float *probs)
 
     lastRoadQuality = 0.85f * lastRoadQuality + 0.15f * expectedScore;
     lastRoadClass = bestIdx + 1;
+    g_road_class_display = lastRoadClass;
 
     Serial.printf(
         "road_quality=%.2f road_class=%d probs=[%.2f %.2f %.2f %.2f %.2f]\n",
@@ -331,6 +332,8 @@ void InferenceTask(void *parameter)
 }
 
 } // namespace
+
+volatile int g_road_class_display = 3;
 
 float getLastRoadQuality()
 {

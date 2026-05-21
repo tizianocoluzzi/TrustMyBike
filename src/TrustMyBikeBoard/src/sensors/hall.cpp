@@ -83,7 +83,7 @@ void HallSensor::hallTask(void* params)
         if(res == pdFALSE){
             firstPulse = true;
             self->setFrequency(0.0f);
-            Serial.println("identified a first pulse");
+            //Serial.println("identified a first pulse");
         }
 
         /* --- Snapshot timestamps atomically --- */
@@ -99,7 +99,7 @@ void HallSensor::hallTask(void* params)
 
             continue;
         }
-
+        Serial.println("nice");
         /* --- Compute period, guarding against micros() overflow wrap --- */
         uint32_t period_us = (t_now >= t_prev)
                              ? (t_now - t_prev)
@@ -149,7 +149,7 @@ double HallSensor::getSpeed()
     }
 
     /* speed = frequency (rev/s) × circumference (2π × radius in meters) */
-    /* Assuming distance is in cm, convert to meters */
-    double circumference = 2.0 * M_PI * (distance / 100.0);
+    /* Assuming distance is in mm, convert to meters */
+    double circumference = 2.0 * M_PI * (distance / 1000.0);
     return frequencyCopy * circumference;
 }
