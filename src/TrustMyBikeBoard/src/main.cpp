@@ -16,7 +16,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include "driver/rtc_io.h"
-
 // #define TEST_MODE 1
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 50

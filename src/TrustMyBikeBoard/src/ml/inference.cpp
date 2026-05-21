@@ -1,4 +1,5 @@
 #include "ml/inference.h"
+#include "display/display.h"
 #include "ml/road_quality_model_data.h"
 
 #include <math.h>
