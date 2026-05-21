@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MQTT Map Viewer</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #111827;
+      color: #f9fafb;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      padding: 16px 20px;
+      background: #1f2937;
+      border-bottom: 1px solid #374151;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      background: #17202f;
+      border-right: 1px solid #374151;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .sidebar h2 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+
+    .config {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .config label {
+      font-size: 14px;
+      color: #d1d5db;
+    }
+
+    .config input {
+      width: 100%;
+      margin-top: 4px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #4b5563;
+      background: #111827;
+      color: white;
+    }
+
+    button {
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    .status {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #111827;
+      border: 1px solid #374151;
+      font-size: 14px;
+    }
+
+    .legend {
+      margin-top: 24px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #111827;
+      border: 1px solid #374151;
+    }
+
+    .legend h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    @media (max-width: 768px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        height: 320px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MQTT Real-Time Map Viewer</h1>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>MQTT Configuration</h2>
+
+      <div class="config">
+        <label>
+          Broker URL
+          <input
+            type="text"
+            id="brokerUrl"
+            value="wss://test.mosquitto.org:8081"
+          />
+        </label>
+
+        <label>
+          Topic
+          <input
+            type="text"
+            id="topic"
+            value="demo/location"
+          />
+        </label>
+
+        <button id="connectBtn">Connect</button>
+      </div>
+
+      <div class="status" id="status">
+        Status: Disconnected
+      </div>
+
+      <div class="legend">
+        <h3>Score Legend</h3>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#22c55e"></div>
+          <span>Level 5 (80 - 100)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#84cc16"></div>
+          <span>Level 4 (60 - 79)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#f59e0b"></div>
+          <span>Level 3 (40 - 59)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#f97316"></div>
+          <span>Level 2 (20 - 39)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#ef4444"></div>
+          <span>Level 1 (0 - 19)</span>
+        </div>
+      </div>
+    </aside>
+
+    <main id="map"></main>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- MQTT.js -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <script>
+    // Initialize map
+    const map = L.map('map').setView([45.4642, 9.19], 5);
+
+    // OpenStreetMap layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Store markers
+    const markers = [];
+
+    // UI elements
+    const connectBtn = document.getElementById('connectBtn');
+    const brokerUrlInput = document.getElementById('brokerUrl');
+    const topicInput = document.getElementById('topic');
+    const statusBox = document.getElementById('status');
+
+    let client = null;
+
+    // Determine marker color from score
+    function getColor(score) {
+      if (score >= 80) {
+        return '#22c55e';
+      }
+
+      if (score >= 60) {
+        return '#84cc16';
+      }
+
+      if (score >= 40) {
+        return '#f59e0b';
+      }
+
+      if (score >= 20) {
+        return '#f97316';
+      }
+
+      return '#ef4444';
+    }
+
+    // Add point to map
+    function addMarker(data) {
+      const { latitude, longitude, score } = data;
+
+      const marker = L.circleMarker([latitude, longitude], {
+        radius: 10,
+        color: getColor(score),
+        fillColor: getColor(score),
+        fillOpacity: 0.8,
+        weight: 2
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <strong>Incoming MQTT Data</strong><br>
+        Latitude: ${latitude}<br>
+        Longitude: ${longitude}<br>
+        Score: ${score}
+      `);
+
+      markers.push(marker);
+
+      // Center map on latest point
+      map.setView([latitude, longitude], 10);
+    }
+
+    function isValidPoint(point) {
+      return (
+        typeof point.latitude === 'number' &&
+        typeof point.longitude === 'number' &&
+        typeof point.score === 'number'
+      );
+    }
+
+    // Connect to MQTT broker
+    connectBtn.addEventListener('click', () => {
+      const brokerUrl = brokerUrlInput.value.trim();
+      const topic = topicInput.value.trim();
+
+      if (!brokerUrl || !topic) {
+        alert('Please provide broker URL and topic');
+        return;
+      }
+
+      // Disconnect existing client
+      if (client) {
+        client.end(true);
+      }
+
+      statusBox.innerHTML = 'Status: Connecting...';
+
+      client = mqtt.connect(brokerUrl);
+
+      client.on('connect', () => {
+        statusBox.innerHTML = `Status: Connected to <b>${brokerUrl}</b>`;
+
+        client.subscribe(topic, (err) => {
+          if (err) {
+            console.error('Subscription error:', err);
+            statusBox.innerHTML = 'Status: Subscription failed';
+            return;
+          }
+
+          console.log('Subscribed to topic:', topic);
+        });
+      });
+
+      client.on('message', (topic, message) => {
+        try {
+          const payload = JSON.parse(message.toString());
+
+          // Case 1: single object
+          if (isValidPoint(payload)) {
+            addMarker(payload);
+            return;
+          }
+
+          // Case 2: array of objects
+          if (Array.isArray(payload)) {
+            payload.forEach((point) => {
+              if (isValidPoint(point)) {
+                addMarker(point);
+              }
+            });
+
+            return;
+          }
+
+          console.error('Invalid payload format:', payload);
+        } catch (error) {
+          console.error('Invalid JSON message:', error);
+        }
+      });
+
+      client.on('error', (error) => {
+        console.error('MQTT Error:', error);
+        statusBox.innerHTML = 'Status: Connection error';
+      });
+
+      client.on('close', () => {
+        statusBox.innerHTML = 'Status: Disconnected';
+      });
+    });
+  </script>
+</body>
+</html>
