@@ -11,7 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+      
+      - name: Debug structure
+        run: find . -name "platformio.ini" -o -name "*.ino" | head -20
+      
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
@@ -29,7 +32,7 @@ jobs:
 
       - name: Rename binary
         run: |
-          cp .pio/build/<YOUR_ENV>/firmware.bin firmware.bin
+          cp .pio/build/heltec_wifi_lora_32_V3/firmware.bin firmware.bin
           # embed the commit SHA in the name for traceability
           echo "FW_FILE=firmware-${{ github.sha }}.bin" >> $GITHUB_ENV
           cp firmware.bin firmware-${{ github.sha }}.bin
