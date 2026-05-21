@@ -33,13 +33,21 @@ jobs:
         run: |
           cp .pio/build/heltec_wifi_lora_32_V3/firmware.bin $GITHUB_WORKSPACE/firmware-${{ github.sha }}.bin
           echo "FW_FILE=firmware-${{ github.sha }}.bin" >> $GITHUB_ENV
-
+      - name: Write version manifest
+        run: |
+          echo '{
+            "version": "${{ github.run_number }}",
+            "sha": "${{ github.sha }}",
+            "file": "firmware-${{ github.sha }}.bin"
+          }' > $GITHUB_WORKSPACE/version.json
       - name: Create/update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: firmware-latest
           name: Latest Firmware
-          files: firmware-${{ github.sha }}.bin
+          files: |
+            firmware-${{ github.sha }}.bin
+            version.json
           # always overwrite the 'firmware-latest' tag
           prerelease: false
         env:
