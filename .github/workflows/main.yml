@@ -22,7 +22,8 @@ jobs:
         run: pip install platformio
 
       - name: Build firmware
-        run: pio run
+        run: cd ~/src/TrustMyBikeBoard/ 
+          pio run
 
       - name: Rename binary
         run: |
