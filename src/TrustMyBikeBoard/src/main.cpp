@@ -16,6 +16,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include "driver/rtc_io.h"
+#include "ota/ota_ble.h"
 // #define TEST_MODE 1
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 50
@@ -102,7 +103,7 @@ static void
 initBLE()
 {
     BLEDevice::init("Heltec-V3");
-
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
 
@@ -118,6 +119,7 @@ initBLE()
         CHAR_RX_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
     pRxChar->setCallbacks(new RxCallbacks());
 
+    ota_ble_init(pService);
     pService->start();
 
     BLEAdvertising *pAdv = BLEDevice::getAdvertising();
@@ -166,6 +168,12 @@ void gatherTask(void *param)
         else 
             cnt = 0;
         if(cnt >= 1000){ //if stop for 20 second
+            if (ota_ble_is_active()) {
+                Serial.println("[Sleep] OTA active, skipping deep sleep");
+                cnt = 0;
+                vTaskDelay(pdMS_TO_TICKS(sampling_interval));
+                continue;
+            }
             Serial.println("[Sleep] Entering deep sleep");
 
             if (pServer->getConnectedCount() > 0)
@@ -353,7 +361,7 @@ void taskBLETx(void *pvParameters)
 {
     for (;;)
     {
-        if (deviceConnected && pTxChar)
+        if (deviceConnected && pTxChar && !ota_ble_is_active())
         {
             int score = getLastRoadClass();   // current class: 1..5
             if (score < 1) score = 1;
