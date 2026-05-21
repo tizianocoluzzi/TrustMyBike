@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:convert'; 
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'ota_service.dart';
 
 class AppState extends ChangeNotifier {
   // --- VARIABILI GPS ---
@@ -25,6 +26,9 @@ class AppState extends ChangeNotifier {
   // --- VARIABILI MQTT ---
   MqttServerClient? mqttClient;
   bool isMqttConnected = false;
+
+  // --- VARIABILI OTA ---
+  final OtaService otaService = OtaService();
 
   final String mlQueueServiceUuid = "12345678-1234-1234-1234-123456789abc";
   final String mlQueueCharacteristicUuid = "12345678-1234-1234-1234-123456789ab0";
@@ -182,7 +186,24 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _positionStream?.cancel(); 
     _bleDataSubscription?.cancel(); 
+    otaService.dispose();
     super.dispose();
+  }
+
+  Future<void> performOtaUpdate() async {
+// Stop listening to road data during OTA
+    await _bleDataSubscription?.cancel();
+    _bleDataSubscription = null;
+
+    await otaService.runOtaUpdate(connectedDevice);
+
+    // Re-setup notifications after OTA (device will reboot anyway,
+    // but good practice if OTA fails)
+    if (connectedDevice != null) {
+      await _setupNotifications(connectedDevice!);
+    }
+
+    notifyListeners();
   }
 
   // ==========================================

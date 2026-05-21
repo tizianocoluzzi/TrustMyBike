@@ -153,7 +153,37 @@ class HomeScreen extends StatelessWidget {
                 },
               ),
             ),
+               // --- 5. OTA UPDATE ---
+            const Divider(),
+            ValueListenableBuilder<String>(
+              valueListenable: state.otaService.status,
+              builder: (_, status, __) => Text(
+                status,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ),
+            const SizedBox(height: 6),
+            ValueListenableBuilder<double?>(
+              valueListenable: state.otaService.progress,
+              builder: (_, progress, __) {
+                if (progress != null && progress < 1.0) {
+                  return LinearProgressIndicator(value: progress);
+                }
+                return ElevatedButton.icon(
+                  onPressed: state.connectedDevice == null
+                      ? null
+                      : () => context.read<AppState>().performOtaUpdate(),
+                  icon: const Icon(Icons.system_update),
+                  label: Text(state.connectedDevice == null
+                      ? "Connetti ESP32 per aggiornare"
+                      : "Aggiorna Firmware"),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
           ],
+
         ),
       ),
     );
