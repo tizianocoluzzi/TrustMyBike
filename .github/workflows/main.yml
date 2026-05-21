@@ -11,10 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Debug structure
-        run: find . -name "platformio.ini" -o -name "*.ino" | head -20
-      
+  
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
@@ -23,11 +20,9 @@ jobs:
 
       - name: Install PlatformIO
         run: pip install platformio
-      
-      - name: Go to dir
-        run: cd ~/src/TrustMyBikeBoard/
-      
+
       - name: Build firmware
+        working-directory: src/TrustMyBikeBoard
         run:  pio run
 
       - name: Rename binary
