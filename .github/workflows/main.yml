@@ -20,10 +20,12 @@ jobs:
 
       - name: Install PlatformIO
         run: pip install platformio
-
+      
+      - name: Go to dir
+        run: cd ~/src/TrustMyBikeBoard/
+      
       - name: Build firmware
-        run: cd ~/src/TrustMyBikeBoard/ 
-          pio run
+        run:  pio run
 
       - name: Rename binary
         run: |
