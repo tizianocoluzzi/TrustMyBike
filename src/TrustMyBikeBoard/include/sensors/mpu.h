@@ -57,3 +57,5 @@ uint8_t readReg(uint8_t reg);
 void mpu_setup();
 void readAccelGyro(mpu_data_t* data);
 void calibrateMPU();
+bool loadCalibrationFromPreferences();
+void saveCalibrationToPreferences();
