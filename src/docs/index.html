@@ -186,18 +186,8 @@
         <h3>Score Legend</h3>
 
         <div class="legend-item">
-          <div class="dot" style="background:#22c55e"></div>
-          <span>Level 5 (80 - 100)</span>
-        </div>
-
-        <div class="legend-item">
-          <div class="dot" style="background:#84cc16"></div>
-          <span>Level 4 (60 - 79)</span>
-        </div>
-
-        <div class="legend-item">
-          <div class="dot" style="background:#f59e0b"></div>
-          <span>Level 3 (40 - 59)</span>
+          <div class="dot" style="background:#ef4444"></div>
+          <span>Level 1 (0 - 19)</span>
         </div>
 
         <div class="legend-item">
@@ -206,8 +196,18 @@
         </div>
 
         <div class="legend-item">
-          <div class="dot" style="background:#ef4444"></div>
-          <span>Level 1 (0 - 19)</span>
+          <div class="dot" style="background:#f59e0b"></div>
+          <span>Level 3 (40 - 59)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#84cc16"></div>
+          <span>Level 4 (60 - 79)</span>
+        </div>
+
+        <div class="legend-item">
+          <div class="dot" style="background:#22c55e"></div>
+          <span>Level 5 (80 - 100)</span>
         </div>
       </div>
     </aside>
@@ -282,7 +282,8 @@
         <strong>Incoming MQTT Data</strong><br>
         Latitude: ${latitude}<br>
         Longitude: ${longitude}<br>
-        Score: ${score}
+        Score: ${score}<br>
+        Timestamp: ${data.timestamp}
       `);
 
       markers.push(marker);
@@ -295,7 +296,8 @@
       return (
         typeof point.latitude === 'number' &&
         typeof point.longitude === 'number' &&
-        typeof point.score === 'number'
+        typeof point.score === 'number' &&
+        (typeof point.timestamp === 'number' || typeof point.timestamp === 'string')
       );
     }
 
