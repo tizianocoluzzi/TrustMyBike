@@ -210,7 +210,7 @@ class AppState extends ChangeNotifier {
   // LOGICA MQTT (VERO BATCHING)
   // ==========================================
   Future<void> _initMqtt() async {
-    mqttClient = MqttServerClient('test.mosquitto.org', 'flutter_bike_${DateTime.now().millisecondsSinceEpoch}');
+    mqttClient = MqttServerClient('broker.hivemq.com', 'flutter_bike_${DateTime.now().millisecondsSinceEpoch}');
     mqttClient!.port = 1883;
     mqttClient!.logging(on: false);
     mqttClient!.keepAlivePeriod = 20;
