@@ -26,11 +26,10 @@ jobs:
         run:  pio run
 
       - name: Rename binary
+        working-directory: src/TrustMyBikeBoard
         run: |
-          cp .pio/build/heltec_wifi_lora_32_V3/firmware.bin firmware.bin
-          # embed the commit SHA in the name for traceability
+          cp .pio/build/heltec_wifi_lora_32_V3/firmware.bin $GITHUB_WORKSPACE/firmware-${{ github.sha }}.bin
           echo "FW_FILE=firmware-${{ github.sha }}.bin" >> $GITHUB_ENV
-          cp firmware.bin firmware-${{ github.sha }}.bin
 
       - name: Create/update GitHub Release
         uses: softprops/action-gh-release@v2
