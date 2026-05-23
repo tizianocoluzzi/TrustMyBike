@@ -18,7 +18,7 @@ constexpr int MOTION_FEATURE_COUNT = ML_MOTION_FEATURE_COUNT;
 constexpr int VEL_FEATURE_COUNT = ML_VEL_FEATURE_COUNT;
 constexpr int STRIDE = ML_STRIDE;
 constexpr int NUM_CLASSES = ML_NUM_CLASSES;
-constexpr int TENSOR_ARENA_SIZE = 40 * 1024;
+constexpr int TENSOR_ARENA_SIZE = 48 * 1024;
 
 alignas(16) uint8_t tensor_arena[TENSOR_ARENA_SIZE];
 
@@ -41,37 +41,34 @@ size_t samplesSinceLastInference = 0;
 volatile float lastRoadQuality = 3.0f;
 volatile int lastRoadClass = 3;
 
-// normalization.json
+// Replace these with the NEWEST values from normalization.json
 constexpr float MOTION_MEAN[MOTION_FEATURE_COUNT] = {
-    -0.5196636915206909f,
-    1.9343878030776978f,
-    9.374368667602539f,
-    16.346221923828125f,
-    0.020852921530604362f,
-    0.0009348283056169748f
+    -0.5216698050498962,
+    2.0063087940216064,
+    9.379547119140625,
+    16.35039710998535,
+    0.02096283808350563,
+    0.0016719583654776216
 };
-
 constexpr float MOTION_STD[MOTION_FEATURE_COUNT] = {
-    2.4927282333374023f,
-    3.5587306022644043f,
-    2.9328017234802246f,
-    1.8535943031311035f,
-    0.2886029779911041f,
-    0.2796790599822998f
+    2.5508053302764893,
+    3.6235244274139404,
+    2.995467185974121,
+    1.8599379062652588,
+    0.2967296838760376,
+    0.28804346919059753
 };
-
 constexpr float VEL_MEAN[VEL_FEATURE_COUNT] = {
-    20.4254093170166f,
-    3.884416103363037f,
-    20.970443725585938f,
-    0.04338475316762924f
+    20.447816848754883,
+    5.1536383628845215,
+    21.40500831604004,
+    0.02098880708217621
 };
-
 constexpr float VEL_STD[VEL_FEATURE_COUNT] = {
-    8.363607406616211f,
-    4.269894599914551f,
-    9.950922012329102f,
-    0.18576408922672272f
+    6.7700018882751465,
+    3.926037073135376,
+    9.391935348510742,
+    0.08772912621498108
 };
 
 float clipf(float x, float minv, float maxv) {
@@ -199,7 +196,6 @@ void readOutputProbabilities(float* probs) {
 
     float sum = 0.0f;
     for (int i = 0; i < NUM_CLASSES; ++i) sum += probs[i];
-
     if (sum > 1e-6f) {
         for (int i = 0; i < NUM_CLASSES; ++i) probs[i] /= sum;
     }
@@ -223,8 +219,7 @@ void updatePrediction(const float* probs) {
 
     Serial.printf(
         "road_quality=%.2f road_class=%d probs=[%.2f %.2f %.2f %.2f %.2f]\n",
-        lastRoadQuality,
-        lastRoadClass,
+        lastRoadQuality, lastRoadClass,
         probs[0], probs[1], probs[2], probs[3], probs[4]
     );
 }
@@ -324,11 +319,11 @@ void setupML() {
     }
     Serial.println();
 
-    Serial.printf("Input 0 type=%d scale=%f zp=%d\n",
+    Serial.printf("Input0 type=%d scale=%f zp=%d\n",
                   input_motion->type, input_motion->params.scale, input_motion->params.zero_point);
-    Serial.printf("Input 1 type=%d scale=%f zp=%d\n",
+    Serial.printf("Input1 type=%d scale=%f zp=%d\n",
                   input_vel->type, input_vel->params.scale, input_vel->params.zero_point);
-    Serial.printf("Output  type=%d scale=%f zp=%d\n",
+    Serial.printf("Output type=%d scale=%f zp=%d\n",
                   output->type, output->params.scale, output->params.zero_point);
 
     xTaskCreatePinnedToCore(InferenceTask, "ML_Inference", 8192, NULL, 1, NULL, 1);

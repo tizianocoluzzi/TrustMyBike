@@ -21,6 +21,14 @@ VEL_FEATURES = ["vel_mean", "vel_std", "vel_last", "vel_zero_ratio"]
 N_CLASSES = 5
 SEED = 42
 
+ORIGINAL_SAMPLE_RATE_HZ = 100
+TARGET_SAMPLE_RATE_HZ = 50
+if ORIGINAL_SAMPLE_RATE_HZ % TARGET_SAMPLE_RATE_HZ != 0:
+    raise ValueError("TARGET_SAMPLE_RATE_HZ must divide ORIGINAL_SAMPLE_RATE_HZ exactly.")
+
+DOWNSAMPLE_FACTOR = ORIGINAL_SAMPLE_RATE_HZ // TARGET_SAMPLE_RATE_HZ
+DOWNSAMPLE_PHASE = 0  # 0 => keep rows 0,2,4... ; 1 => keep rows 1,3,5...
+
 LABELS = {
     1: 4, 2: 3, 3: 4, 5: 5, 6: 5, 7: 4, 8: 3, 9: 3,
     10: 2, 12: 4, 13: 4, 14: 2, 18: 2, 19: 3, 20: 4,
@@ -59,12 +67,21 @@ def recording_id_from_name(name: str) -> int:
     return int(m.group(1))
 
 
+def downsample_dataframe(df: pd.DataFrame, factor: int, phase: int = 0) -> pd.DataFrame:
+    if factor <= 1:
+        return df.reset_index(drop=True)
+    if not (0 <= phase < factor):
+        raise ValueError(f"phase must be in [0, {factor-1}]")
+    return df.iloc[phase::factor].reset_index(drop=True)
+
+
 def load_csv(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     df = df[RAW_COLUMNS].copy()
     df = df.apply(pd.to_numeric, errors="coerce")
     df["vel"] = df["vel"].clip(lower=0.0, upper=40.0)
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
+    df = downsample_dataframe(df, DOWNSAMPLE_FACTOR, DOWNSAMPLE_PHASE)
     return df
 
 
@@ -82,14 +99,29 @@ def velocity_window_features(vel_window: np.ndarray) -> np.ndarray:
 def load_recordings():
     recordings = {}
     rec_labels = {}
+    recording_info = {}
+
     for csv_path in sorted(DATA_DIR.glob("data_*.csv")):
         rec_id = recording_id_from_name(csv_path.name)
         if rec_id not in LABELS:
             continue
+
+        raw_df = pd.read_csv(csv_path)
+        raw_rows = len(raw_df)
+
         df = load_csv(csv_path)
+        downsampled_rows = len(df)
+
         recordings[rec_id] = df
         rec_labels[rec_id] = LABELS[rec_id]
-    return recordings, rec_labels
+        recording_info[rec_id] = {
+            "file": csv_path.name,
+            "raw_rows": int(raw_rows),
+            "downsampled_rows": int(downsampled_rows),
+            "label": int(LABELS[rec_id]),
+        }
+
+    return recordings, rec_labels, recording_info
 
 
 def build_windows_for_config(recordings, rec_labels, window, stride):
@@ -108,7 +140,10 @@ def build_windows_for_config(recordings, rec_labels, window, stride):
             g_all.append(rec_id)
 
     if not x_motion:
-        raise RuntimeError(f"No windows created for window={window}, stride={stride}")
+        raise RuntimeError(
+            f"No windows created for window={window}, stride={stride}. "
+            f"Downsampling may have made recordings too short."
+        )
 
     return (
         np.asarray(x_motion, dtype=np.float32),
@@ -139,9 +174,7 @@ def evaluate_ordinal_metrics(y_true_zero_based: np.ndarray, probs: np.ndarray):
     cm = confusion_matrix(y_true, y_pred, labels=np.arange(1, N_CLASSES + 1))
     abs_err = np.abs(y_pred - y_true)
 
-    error_hist = {
-        f"off_by_{i}": int(np.sum(abs_err == i)) for i in range(5)
-    }
+    error_hist = {f"off_by_{i}": int(np.sum(abs_err == i)) for i in range(5)}
 
     per_class_accuracy = {}
     for cls in range(1, N_CLASSES + 1):
@@ -381,7 +414,7 @@ def run_cv_for_config(config, recordings, rec_labels):
     return summary
 
 
-def retrain_best_model(best_config, recordings, rec_labels):
+def retrain_best_model(best_config, recordings, rec_labels, recording_info):
     x_motion_all, x_vel_all, y_all, g_all = build_windows_for_config(
         recordings, rec_labels, best_config["window"], best_config["stride"]
     )
@@ -471,6 +504,10 @@ def retrain_best_model(best_config, recordings, rec_labels):
             "velocity_mean": vel_mean.tolist(),
             "velocity_std": vel_std.tolist(),
             "best_config": best_config,
+            "original_sample_rate_hz": ORIGINAL_SAMPLE_RATE_HZ,
+            "target_sample_rate_hz": TARGET_SAMPLE_RATE_HZ,
+            "downsample_factor": DOWNSAMPLE_FACTOR,
+            "downsample_phase": DOWNSAMPLE_PHASE,
         }, f, indent=2)
 
     with open(BASE_DIR / "training_summary.json", "w") as f:
@@ -492,6 +529,11 @@ def retrain_best_model(best_config, recordings, rec_labels):
             "history": {k: [float(vv) for vv in v] for k, v in history.history.items()},
             "val_groups": [int(x) for x in val_groups],
             "train_groups": [int(x) for x in train_groups],
+            "original_sample_rate_hz": ORIGINAL_SAMPLE_RATE_HZ,
+            "target_sample_rate_hz": TARGET_SAMPLE_RATE_HZ,
+            "downsample_factor": DOWNSAMPLE_FACTOR,
+            "downsample_phase": DOWNSAMPLE_PHASE,
+            "recording_info": recording_info,
         }, f, indent=2)
 
     tflite_model = export_tflite(model, x_motion_train_n, x_vel_train_n)
@@ -511,8 +553,11 @@ def retrain_best_model(best_config, recordings, rec_labels):
 def main():
     tf.keras.utils.set_random_seed(SEED)
 
-    recordings, rec_labels = load_recordings()
+    recordings, rec_labels, recording_info = load_recordings()
     trial_configs = make_trial_configs()
+
+    print(f"Using downsampled data: {ORIGINAL_SAMPLE_RATE_HZ} Hz -> {TARGET_SAMPLE_RATE_HZ} Hz (factor={DOWNSAMPLE_FACTOR}, phase={DOWNSAMPLE_PHASE})")
+    print(f"Loaded {len(recordings)} recordings")
 
     all_results = []
     best_result = None
@@ -532,6 +577,10 @@ def main():
                 "kernels": list(config["kernels"]),
             },
             **summary,
+            "original_sample_rate_hz": ORIGINAL_SAMPLE_RATE_HZ,
+            "target_sample_rate_hz": TARGET_SAMPLE_RATE_HZ,
+            "downsample_factor": DOWNSAMPLE_FACTOR,
+            "downsample_phase": DOWNSAMPLE_PHASE,
         }
         all_results.append(result)
 
@@ -588,6 +637,10 @@ def main():
             "cv_mean_within_1_class": r["cv_mean_within_1_class"],
             "cv_mean_within_2_classes": r["cv_mean_within_2_classes"],
             "cv_std_quadratic_weighted_kappa": r["cv_std_quadratic_weighted_kappa"],
+            "original_sample_rate_hz": r["original_sample_rate_hz"],
+            "target_sample_rate_hz": r["target_sample_rate_hz"],
+            "downsample_factor": r["downsample_factor"],
+            "downsample_phase": r["downsample_phase"],
         })
 
     pd.DataFrame(rows).sort_values(
@@ -606,7 +659,7 @@ def main():
         )
     )
 
-    final_metrics = retrain_best_model(best_result["config"], recordings, rec_labels)
+    final_metrics = retrain_best_model(best_result["config"], recordings, rec_labels, recording_info)
 
     print("\nFinal retrained model metrics:")
     print(f"Validation accuracy: {final_metrics['accuracy']:.4f}")
