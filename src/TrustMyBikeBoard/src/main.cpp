@@ -142,7 +142,7 @@ void gatherTask(void *param)
     {
         readAccelGyro(&mpu_data);
         double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
-        memccpy(&data, &mpu_data,1, sizeof(mpu_data_t));
+        data.mpu = mpu_data;
         data.vel = velocity;
         data.volt = ina.getBusVoltage_V();
         snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data.mpu.ax,
@@ -159,7 +159,7 @@ void gatherTask(void *param)
             snprintf(buf, sizeof(buf),
                      "volt:%6.2f vel:%6.2f\naz:%6.2f road:%d",
                      data.volt, velocity, data.mpu.az,
-                     g_road_class_display);
+                     getLastRoadClass());
             display_message(buf);
         }
         i = (i + 1) % 10;
