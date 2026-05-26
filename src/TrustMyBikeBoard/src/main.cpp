@@ -60,6 +60,8 @@ static bool deviceConnected = false;
 static volatile bool newDataAvailable = false;
 static String receivedData = "";
 static SemaphoreHandle_t dataMutex;
+static uint32_t ble_sample_id = 0;
+
 
 // ── BLE Callbacks
 // ─────────────────────────────────────────────────────────────
@@ -70,10 +72,11 @@ class ServerCallbacks : public BLEServerCallbacks
     {
         deviceConnected = true;
 
+
         Serial.printf("[BLE] Client connected from start in time: %f ms\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
         BLEDevice::stopAdvertising();
         Serial.printf(">conn_time: %f \r\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
-    }
+
     void
     onDisconnect(BLEServer *pServer) override
     {
