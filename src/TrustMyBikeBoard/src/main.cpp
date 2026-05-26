@@ -71,13 +71,15 @@ class ServerCallbacks : public BLEServerCallbacks
         deviceConnected = true;
 
         Serial.printf("[BLE] Client connected from start in time: %f ms\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
+        BLEDevice::stopAdvertising();
+        Serial.printf(">conn_time: %f \r\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
     }
     void
     onDisconnect(BLEServer *pServer) override
     {
         deviceConnected = false;
         Serial.println("[BLE] Client disconnected — restarting advertising");
-        pServer->startAdvertising();
+        //pServer->startAdvertising();
     }
 };
 
@@ -103,7 +105,7 @@ static void
 initBLE()
 {
     BLEDevice::init("Heltec-V3");
-    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P3);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
 
@@ -187,6 +189,12 @@ void gatherTask(void *param)
            // gpio_pullup_en(HALL_GPIO);
            // gpio_pulldown_dis(HALL_GPIO);
 
+            BLEDevice::deinit(true);
+            mpu_sleep();
+            //ina.powerSave(true);
+            Heltec.display->sleep();
+            pinMode(21, OUTPUT);
+            digitalWrite(21, LOW); // cuts Vext → OLED VCC
             uint64_t pinMask = (1ULL << HALL_GPIO);
             esp_sleep_enable_ext1_wakeup(pinMask, ESP_EXT1_WAKEUP_ANY_LOW);
 
@@ -393,8 +401,8 @@ void setup()
 #ifndef TEST_MODE //if in test mode sensors are not initialized
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);
-    ina.begin(&Wire1);
-    ina.setCalibration_32V_2A();
+    //ina.begin(&Wire1);
+    //ina.setCalibration_32V_2A();
     mpu_setup();
     display_message("loading calibration");
 

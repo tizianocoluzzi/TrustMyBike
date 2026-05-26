@@ -11,7 +11,7 @@ typedef struct mpu_data_t{
 
 }mpu_data_t;
 
-
+void mpu_sleep();
 
 static inline void addSample(mpu_data_t* acc, const mpu_data_t* sample) {
   acc->ax += sample->ax;
