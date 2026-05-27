@@ -1,0 +1,31 @@
+version: '3.9'
+
+services:
+
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+
+  backend:
+    build:
+      context: ./backend
+    container_name: mqtt-backend
+    ports:
+      - "8001:8000"
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: 1883
+      MQTT_TOPIC: trustmybike/road_quality_batch
+    depends_on:
+      - mosquitto
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: mqtt-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

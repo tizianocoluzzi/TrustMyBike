@@ -20,6 +20,7 @@
 // #define TEST_MODE 1
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 50
+#define TIME_BEFORE_SLEEP 10
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
@@ -76,6 +77,7 @@ class ServerCallbacks : public BLEServerCallbacks
         Serial.printf("[BLE] Client connected from start in time: %f ms\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
         BLEDevice::stopAdvertising();
         Serial.printf(">conn_time: %f \r\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
+    }
 
     void
     onDisconnect(BLEServer *pServer) override
@@ -172,7 +174,7 @@ void gatherTask(void *param)
             cnt++;
         else 
             cnt = 0;
-        if(cnt >= 1000){ //if stop for 20 second
+        if(cnt >= TIME_BEFORE_SLEEP*SAMPLING_FREQUENCY){ //if stop for 20 second
             if (ota_ble_is_active()) {
                 Serial.println("[Sleep] OTA active, skipping deep sleep");
                 cnt = 0;
