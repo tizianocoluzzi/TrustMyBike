@@ -53,7 +53,7 @@ The service offered by the system is the generation of geo-referenced road-quali
 
 The available project material explicitly identifies the following targets and achieved constraints:
 
-- [x] Total power less than or equal to 6 W with a reported operating point of 120 mA at 3.3 V, corresponding to about 369 mW.
+- [x] Total power less than or equal to 6 W
 - [x] Time duration of 10 h plus 14 h deep sleep.
 - [x] Reconnection latency of 1 s.
 - [ ] Machine-learning accuracy target of 80%, with QWK reported as 80%: not accomplished due to the low numbered dataset.
@@ -77,7 +77,7 @@ The project consists of three main layers:
 2. A Flutter mobile application.
 3. A network service layer using MQTT.
 
-[INSERT SYSTEM ARCHITECTURE DIAGRAM]
+<img width="745" height="490" alt="image" src="https://github.com/user-attachments/assets/0162538d-4030-466e-b9af-1ad1643ca060" />
 
 ### Architectural Blocks
 
@@ -95,7 +95,6 @@ The project consists of three main layers:
 4. The app associates each score with GPS latitude, longitude, and timestamp.
 5. Every 10 collected points, the app serializes the batch to JSON and publishes one MQTT message.
 
-[INSERT NETWORK DIAGRAM]
 
 ---
 
@@ -115,8 +114,7 @@ The board-side project is configured for `heltec_wifi_lora_32_V3` in PlatformIO,
 | OLED display | Local status display | `Heltec.display` usage in display module |
 | SD card interface | Optional local CSV storage | `sd.h`, SPI pins, counter-based filenames |
 
-[INSERT HARDWARE IMAGE]
-
+<img width="1536" height="2048" alt="WhatsApp Image 2026-05-27 at 14 06 54" src="https://github.com/user-attachments/assets/1b16a918-7588-4db9-8b3a-616ecdf91b79" />
 ### Declared Board-Level Details
 
 The embedded headers define:
@@ -283,6 +281,12 @@ However, the exact mapping between the final reported headline values in the pro
 - the exact experiment version used for the final reported numbers,
 - raw plots and tables.
 
+<img width="700" height="500" alt="CNN only vs fusion" src="https://github.com/user-attachments/assets/74a3f814-5db0-4508-8c66-50ac38517f1c" />
+
+<img width="700" height="500" alt="confusion matrix" src="https://github.com/user-attachments/assets/19d28d71-6c6d-45af-82d0-4cc793dd2539" />
+
+<img width="700" height="500" alt="CV metrics" src="https://github.com/user-attachments/assets/e55a512c-a57e-4315-bd07-7d47bedb2eea" />
+
 ---
 
 ## Results
@@ -298,6 +302,12 @@ The project information explicitly reports the following final outcomes:
 - QWK: 70%,
 - sampling frequency: 50 Hz.
 
+
+<img width="1665" height="817" alt="Screenshot From 2026-05-26 16-49-05" src="https://github.com/user-attachments/assets/df2b1b75-416f-479b-9abe-37c474099660" />
+
+<img width="602" height="415" alt="Screenshot From 2026-05-26 16-45-08" src="https://github.com/user-attachments/assets/e5332a96-a498-4f96-9e63-25900f3883cf" />
+
+
 ### Additional Repository Metrics
 
 The training artifacts in the repository also expose validation metrics for at least one run, including:
@@ -309,9 +319,6 @@ The training artifacts in the repository also expose validation metrics for at l
 - within-1-class performance,
 - confusion matrix,
 - per-class accuracy.
-
-[INSERT EVALUATION GRAPH]
-
 ---
 
 
