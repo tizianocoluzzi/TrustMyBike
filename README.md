@@ -1,7 +1,10 @@
 # TrustMyBike
 
 A final IoT project for road-surface quality monitoring during urban cycling. The system combines an embedded sensing node with a mobile application to collect motion and location data, infer a road-quality class, and publish batched geo-referenced observations for downstream services and visualization.
-
+## Contributors
+- Tiziano Coluzzi [![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/tizianocoluzzi)
+- Aldo Bosco [![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/aldobosco)
+- Alessandro Arellano Altuna [![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/arellantium)
 ## Repository Links
 
 - GitHub repository: https://github.com/tizianocoluzzi/TrustMyBike
@@ -9,7 +12,6 @@ A final IoT project for road-surface quality monitoring during urban cycling. Th
 ## Media
 
 - Demo video: https://youtube.com/shorts/E_YMKo_QBs8?si=Xx5bsStZRcIRPyXL
-
 ---
 
 ## Project Overview
