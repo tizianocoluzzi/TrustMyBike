@@ -5,6 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:convert'; 
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'ota_service.dart';
 
 class AppState extends ChangeNotifier {
   // --- VARIABILI GPS ---
@@ -13,6 +14,8 @@ class AppState extends ChangeNotifier {
   double speedKmH = 0.0;
   int roadQualityScore = 5; 
   List<RoadPoint> roadHistory = [];
+  List<RoadSegment> roadSegments = [];
+  RoadPoint? _previousRoadPoint;
   StreamSubscription<Position>? _positionStream;
 
   // --- VARIABILI BLUETOOTH ---
@@ -25,6 +28,13 @@ class AppState extends ChangeNotifier {
   // --- VARIABILI MQTT ---
   MqttServerClient? mqttClient;
   bool isMqttConnected = false;
+  String mqttPublishStatus = "";
+
+  // --- LOG APP ---
+  final List<String> appLogs = [];
+
+  // --- VARIABILI OTA ---
+  final OtaService otaService = OtaService();
 
   final String mlQueueServiceUuid = "12345678-1234-1234-1234-123456789abc";
   final String mlQueueCharacteristicUuid = "12345678-1234-1234-1234-123456789ab0";
@@ -32,6 +42,15 @@ class AppState extends ChangeNotifier {
   AppState() {
     _initGpsStream();
     _initMqtt(); 
+  }
+
+  void _addLog(String message) {
+    final timestamp = DateTime.now().toIso8601String();
+    appLogs.add("$timestamp - $message");
+    if (appLogs.length > 200) {
+      appLogs.removeAt(0);
+    }
+    notifyListeners();
   }
 
   // ==========================================
@@ -59,7 +78,7 @@ class AppState extends ChangeNotifier {
       });
 
     } catch (e) {
-      print("Sensore GPS non trovato. Carico dati finti per testare la UI.");
+      _addLog("Sensore GPS non trovato. Carico dati finti per testare la UI.");
       latitude = 41.8902;  
       longitude = 12.4922;
       speedKmH = 45.5;     
@@ -98,12 +117,12 @@ class AppState extends ChangeNotifier {
       // =======================================================
       device.connectionState.listen((BluetoothConnectionState state) async {
         if (state == BluetoothConnectionState.disconnected) {
-          print(" ESP32 in Deep Sleep o disconnesso...");
+          _addLog("ESP32 in Deep Sleep o disconnesso...");
           bleData = "ESP in Deep Sleep. Attesa...";
           notifyListeners();
 
         } else if (state == BluetoothConnectionState.connected) {
-          print(" Connessione BLE stabilita. Configuro i sensori...");
+          _addLog("Connessione BLE stabilita. Configuro i sensori...");
           bleData = "Connesso! Riattivazione sensori...";
           notifyListeners();
 
@@ -133,7 +152,7 @@ class AppState extends ChangeNotifier {
               
               // 1. Riaccendiamo le notifiche
               await characteristic.setNotifyValue(true);
-              print(" Iscrizione alla coda ML completata.");
+              _addLog("Iscrizione alla coda ML completata.");
               
               // 2. Stacchiamo le vecchie orecchie se c'erano (evita dati sdoppiati)
               await _bleDataSubscription?.cancel();
@@ -157,15 +176,26 @@ class AppState extends ChangeNotifier {
                   );
 
                   roadHistory.add(nuovoPunto);
-                  print(" Punto accumulato (Totale: ${roadHistory.length}/10)");
+                  if (_previousRoadPoint != null) {
+                    roadSegments.add(RoadSegment(
+                      from: _previousRoadPoint!,
+                      to: nuovoPunto,
+                      score: nuovoPunto.score,
+                    ));
+                    _addLog("Segmento accumulato (Totale: ${roadSegments.length}/10)");
+                  } else {
+                    _addLog("Primo punto ricevuto. In attesa del prossimo per creare un segmento.");
+                  }
 
-                  if (roadHistory.length >= 10) {
+                  _previousRoadPoint = nuovoPunto;
+
+                  if (roadSegments.length >= 10) {
                     publishRoadPointsBatch();
                   }
 
                   notifyListeners(); 
                 } else {
-                  print("Dato sporco ignorato: $stringaRicevuta");
+                  _addLog("Dato sporco ignorato: $stringaRicevuta");
                 }
               });
             }
@@ -173,7 +203,7 @@ class AppState extends ChangeNotifier {
         }
       }
     } catch (e) {
-      print("Errore durante il setup delle notifiche: $e");
+      _addLog("Errore durante il setup delle notifiche: $e");
     }
   }
 
@@ -182,14 +212,31 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _positionStream?.cancel(); 
     _bleDataSubscription?.cancel(); 
+    otaService.dispose();
     super.dispose();
+  }
+
+  Future<void> performOtaUpdate() async {
+// Stop listening to road data during OTA
+    await _bleDataSubscription?.cancel();
+    _bleDataSubscription = null;
+
+    await otaService.runOtaUpdate(connectedDevice);
+
+    // Re-setup notifications after OTA (device will reboot anyway,
+    // but good practice if OTA fails)
+    if (connectedDevice != null) {
+      await _setupNotifications(connectedDevice!);
+    }
+
+    notifyListeners();
   }
 
   // ==========================================
   // LOGICA MQTT (VERO BATCHING)
   // ==========================================
   Future<void> _initMqtt() async {
-    mqttClient = MqttServerClient('test.mosquitto.org', 'flutter_bike_${DateTime.now().millisecondsSinceEpoch}');
+    mqttClient = MqttServerClient('docker', 'flutter_bike_${DateTime.now().millisecondsSinceEpoch}');
     mqttClient!.port = 1883;
     mqttClient!.logging(on: false);
     mqttClient!.keepAlivePeriod = 20;
@@ -197,10 +244,10 @@ class AppState extends ChangeNotifier {
     try {
       await mqttClient!.connect();
       isMqttConnected = true;
-      print(" Connesso al Broker MQTT con successo!");
+      _addLog("Connesso al Broker MQTT con successo!");
       notifyListeners();
     } catch (e) {
-      print(" Errore di connessione MQTT: $e");
+      _addLog("Errore di connessione MQTT: $e");
       mqttClient!.disconnect();
     }
   }
@@ -208,19 +255,15 @@ class AppState extends ChangeNotifier {
   // Prende tutta la lista e la manda come UN SOLO messaggio
   void publishRoadPointsBatch() {
     if (mqttClient == null || mqttClient!.connectionStatus!.state != MqttConnectionState.connected) {
-      print(" MQTT non connesso. I dati rimangono nel buffer locale (${roadHistory.length} punti).");
+      mqttPublishStatus = "MQTT non connesso. I dati restano nel buffer locale (${roadSegments.length} segmenti).";
+      _addLog(mqttPublishStatus);
       return; 
     }
 
-    if (roadHistory.isEmpty) return;
+    if (roadSegments.isEmpty) return;
 
-    // Trasforma i 10 punti in un array di JSON
-    List<Map<String, dynamic>> jsonBatch = roadHistory.map((point) => {
-      "latitude": point.latitude,
-      "longitude": point.longitude,
-      "score": point.score,
-      "timestamp": point.timestamp.toIso8601String()
-    }).toList();
+    // Trasforma i segmenti in un array di JSON
+    List<Map<String, dynamic>> jsonBatch = roadSegments.map((segment) => segment.toJson()).toList();
 
     // Incolla tutto in una singola stringa testuale
     String payload = jsonEncode(jsonBatch);
@@ -228,16 +271,28 @@ class AppState extends ChangeNotifier {
     final builder = MqttClientPayloadBuilder();
     builder.addString(payload);
 
-    mqttClient!.publishMessage(
-      'trustmybike/road_quality_batch', 
-      MqttQos.atLeastOnce,
-      builder.payload!
-    );
-    
-    print(" Unico Batch da ${roadHistory.length} punti inviato con successo via MQTT!");
+    try {
+      final messageId = mqttClient!.publishMessage(
+        'trustmybike/road_quality_batch', 
+        MqttQos.atLeastOnce,
+        builder.payload!
+      );
+
+      if (messageId > 0) {
+        mqttPublishStatus = "Batch MQTT inviato (messageId: $messageId, segmenti: ${roadSegments.length}).";
+        _addLog(mqttPublishStatus);
+      } else {
+        mqttPublishStatus = "Errore invio MQTT: publish non accettato (messageId: $messageId).";
+        _addLog(mqttPublishStatus);
+      }
+    } catch (e) {
+      mqttPublishStatus = "Errore invio MQTT: $e";
+      _addLog(mqttPublishStatus);
+      return;
+    }
     
     // Svuota la lista solo dopo aver inviato il pacco!
-    roadHistory.clear(); 
+    roadSegments.clear(); 
     notifyListeners(); 
   }
 }
@@ -259,5 +314,34 @@ class RoadPoint {
   @override
   String toString() {
     return "Punto: ($latitude, $longitude) -> Voto: $score";
+  }
+}
+
+// Modello per salvare un segmento tra due punti consecutivi
+class RoadSegment {
+  final RoadPoint from;
+  final RoadPoint to;
+  final int score;
+
+  RoadSegment({
+    required this.from,
+    required this.to,
+    required this.score,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      "from": {
+        "latitude": from.latitude,
+        "longitude": from.longitude,
+        "timestamp": from.timestamp.toIso8601String(),
+      },
+      "to": {
+        "latitude": to.latitude,
+        "longitude": to.longitude,
+        "timestamp": to.timestamp.toIso8601String(),
+      },
+      "score": score,
+    };
   }
 }

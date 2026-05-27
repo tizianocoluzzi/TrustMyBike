@@ -16,9 +16,11 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include "driver/rtc_io.h"
+#include "ota/ota_ble.h"
 // #define TEST_MODE 1
 #define WINDOW_SIZE 16
 #define SAMPLING_FREQUENCY 50
+#define TIME_BEFORE_SLEEP 10
 
 const uint32_t sampling_interval = 1000 / SAMPLING_FREQUENCY;
 const double dt = sampling_interval / 1000.0;
@@ -59,6 +61,8 @@ static bool deviceConnected = false;
 static volatile bool newDataAvailable = false;
 static String receivedData = "";
 static SemaphoreHandle_t dataMutex;
+static uint32_t ble_sample_id = 0;
+
 
 // ── BLE Callbacks
 // ─────────────────────────────────────────────────────────────
@@ -69,14 +73,18 @@ class ServerCallbacks : public BLEServerCallbacks
     {
         deviceConnected = true;
 
+
         Serial.printf("[BLE] Client connected from start in time: %f ms\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
+        BLEDevice::stopAdvertising();
+        Serial.printf(">conn_time: %f \r\n", ((float) esp_timer_get_time()-(float)start_time)/1000);
     }
+
     void
     onDisconnect(BLEServer *pServer) override
     {
         deviceConnected = false;
         Serial.println("[BLE] Client disconnected — restarting advertising");
-        pServer->startAdvertising();
+        //pServer->startAdvertising();
     }
 };
 
@@ -102,7 +110,7 @@ static void
 initBLE()
 {
     BLEDevice::init("Heltec-V3");
-
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P3);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new ServerCallbacks());
 
@@ -118,6 +126,7 @@ initBLE()
         CHAR_RX_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
     pRxChar->setCallbacks(new RxCallbacks());
 
+    ota_ble_init(pService);
     pService->start();
 
     BLEAdvertising *pAdv = BLEDevice::getAdvertising();
@@ -140,7 +149,7 @@ void gatherTask(void *param)
     {
         readAccelGyro(&mpu_data);
         double velocity = hallSensor ? hallSensor->getSpeed() : 0.0;
-        memccpy(&data, &mpu_data,1, sizeof(mpu_data_t));
+        data.mpu = mpu_data;
         data.vel = velocity;
         data.volt = ina.getBusVoltage_V();
         snprintf(buf, sizeof(buf), "%f,%f,%f,%f,%f,%f,%f,%f,%f\n", data.mpu.ax,
@@ -157,7 +166,7 @@ void gatherTask(void *param)
             snprintf(buf, sizeof(buf),
                      "volt:%6.2f vel:%6.2f\naz:%6.2f road:%d",
                      data.volt, velocity, data.mpu.az,
-                     g_road_class_display);
+                     getLastRoadClass());
             display_message(buf);
         }
         i = (i + 1) % 10;
@@ -165,7 +174,13 @@ void gatherTask(void *param)
             cnt++;
         else 
             cnt = 0;
-        if(cnt >= 1000){ //if stop for 20 second
+        if(cnt >= TIME_BEFORE_SLEEP*SAMPLING_FREQUENCY){ //if stop for 20 second
+            if (ota_ble_is_active()) {
+                Serial.println("[Sleep] OTA active, skipping deep sleep");
+                cnt = 0;
+                vTaskDelay(pdMS_TO_TICKS(sampling_interval));
+                continue;
+            }
             Serial.println("[Sleep] Entering deep sleep");
 
             if (pServer->getConnectedCount() > 0)
@@ -179,6 +194,12 @@ void gatherTask(void *param)
            // gpio_pullup_en(HALL_GPIO);
            // gpio_pulldown_dis(HALL_GPIO);
 
+            BLEDevice::deinit(true);
+            mpu_sleep();
+            //ina.powerSave(true);
+            Heltec.display->sleep();
+            pinMode(21, OUTPUT);
+            digitalWrite(21, LOW); // cuts Vext → OLED VCC
             uint64_t pinMask = (1ULL << HALL_GPIO);
             esp_sleep_enable_ext1_wakeup(pinMask, ESP_EXT1_WAKEUP_ANY_LOW);
 
@@ -353,7 +374,7 @@ void taskBLETx(void *pvParameters)
 {
     for (;;)
     {
-        if (deviceConnected && pTxChar)
+        if (deviceConnected && pTxChar && !ota_ble_is_active())
         {
             int score = getLastRoadClass();   // current class: 1..5
             if (score < 1) score = 1;
@@ -385,8 +406,8 @@ void setup()
 #ifndef TEST_MODE //if in test mode sensors are not initialized
     Wire1.begin(SDA_PIN, SCL_PIN);
     Wire1.setClock(100000);
-    ina.begin(&Wire1);
-    ina.setCalibration_32V_2A();
+    //ina.begin(&Wire1);
+    //ina.setCalibration_32V_2A();
     mpu_setup();
     display_message("loading calibration");
 

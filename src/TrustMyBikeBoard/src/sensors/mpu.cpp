@@ -11,7 +11,13 @@ mpu_data_t mpuOffset = {0};
 Preferences preferences;
 
 
-
+void mpu_sleep() {
+    uint8_t val = 0x40; // PWR_MGMT_1: SLEEP bit
+    Wire1.beginTransmission(MPU_ADDR);
+    Wire1.write(0x6B);
+    Wire1.write(val);
+    Wire1.endTransmission();
+}
 void writeReg(uint8_t reg, uint8_t val) {
   Wire1.beginTransmission(MPU_ADDR);
   Wire1.write(reg);
