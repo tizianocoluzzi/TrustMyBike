@@ -5,11 +5,10 @@ A final IoT project for road-surface quality monitoring during urban cycling. Th
 ## Repository Links
 
 - GitHub repository: https://github.com/tizianocoluzzi/TrustMyBike
-- Public blog post / LinkedIn article: [ADD PUBLIC BLOG POST LINK]
 
 ## Media
 
-- Demo video: [INSERT YOUTUBE DEMO LINK]
+- Demo video: https://youtube.com/shorts/E_YMKo_QBs8?si=Xx5bsStZRcIRPyXL
 
 ---
 
@@ -17,7 +16,7 @@ A final IoT project for road-surface quality monitoring during urban cycling. Th
 
 TrustMyBike addresses the problem of monitoring road-surface quality from the perspective of cyclists, with the goal of associating sensed motion patterns and position data to a discrete road-quality score.
 
-The implemented system is centered on a single embedded sensing platform and a companion mobile application. This aligns with an IoT project approach in which the effort, reasoning, and justification of design choices are more important than maximizing the number of sensors or actuators.
+The implemented system is centered on a single embedded sensing platform and a companion mobile application. This project approach prioritize effort, reasoning, and justification of design choices more than maximizing the number of sensors or actuators.
 
 ### Core Idea
 
@@ -54,11 +53,11 @@ The service offered by the system is the generation of geo-referenced road-quali
 
 The available project material explicitly identifies the following targets and achieved constraints:
 
-- Total power less than or equal to 6 W: accomplished, with a reported operating point of 120 mA at 3.3 V, corresponding to about 369 mW.
-- Time duration of 10 h plus 14 h deep sleep: accomplished, with the note that a 2000 mA battery is sufficient.
-- Reconnection latency of 1 s: accomplished.
-- Machine-learning accuracy target of 80%, with QWK reported as 80%: not accomplished due to the low numbered dataset.
-- Sampling frequency established at 50 Hz via FFT.
+- [x] Total power less than or equal to 6 W with a reported operating point of 120 mA at 3.3 V, corresponding to about 369 mW.
+- [x] Time duration of 10 h plus 14 h deep sleep.
+- [x] Reconnection latency of 1 s.
+- [ ] Machine-learning accuracy target of 80%, with QWK reported as 80%: not accomplished due to the low numbered dataset.
+- [x] Sampling frequency established at 50 Hz via FFT.
 
 ---
 
@@ -67,12 +66,6 @@ The available project material explicitly identifies the following targets and a
 ### Operational Scenario
 
 A cyclist rides in an urban environment while the embedded node measures motion data and velocity-related information. The node estimates road quality and advertises the result over BLE; the phone application connects, receives notifications, adds GPS coordinates, and publishes batches to MQTT.
-
-### Main Stakeholders
-
-- Cyclists, as primary users affected by road quality.
-- Project evaluators, as readers of the Concept, Design, and Evaluation deliverables.
-- Developers or maintainers interested in the embedded, mobile, and ML pipeline.
 
 ---
 
@@ -129,7 +122,7 @@ The board-side project is configured for `heltec_wifi_lora_32_V3` in PlatformIO,
 The embedded headers define:
 
 - I2C pins: SDA 48, SCL 47.
-- SPI pins: SCK 7, MISO 6, MOSI 5, CS 4.
+- SPI pins: SCK 7, MISO 6, MOSI 5, CS 4. (used for data collection with an sdcard)
 - MPU address: `0x68`.
 
 ---
@@ -208,7 +201,6 @@ These labels are part of the application UI and should be treated as the current
 
 The embedded code defines a sampling frequency of 50 Hz and a fixed sampling interval derived from that value.
 
-The user-provided project notes state that the 50 Hz sampling frequency was established via FFT.
 
 [INSERT EVALUATION GRAPH]
 
@@ -216,7 +208,7 @@ The user-provided project notes state that the 50 Hz sampling frequency was esta
 
 The ML inference interface specifies:
 
-- window size: 64 samples,
+- window size: 196 samples,
 - stride: 16 samples,
 - 5 output classes,
 - 6 motion features per sample (`ax, ay, az, gx, gy, gz`),
@@ -273,13 +265,11 @@ The project notes and codebase support evaluation along at least four dimensions
 
 | Dimension | Target / requirement | Reported outcome |
 |---|---|---|
-| Power | Total power <= 6 W | Accomplished; 120 mA at 3.3 V, about 369 mW |
-| Duration | 10 h + 14 h deep sleep | Accomplished; 2000 mA battery reported as sufficient |
+| Power | Total power <= 6 W | 120 mA at 3.3 V, about 369 mW |
+| Duration | 10 h + 14 h deep sleep | 120 mA * 10h + 2mA * 14h = 1228 mAh <= 2000 mAh battery|
 | Reconnection latency | 1 s | Accomplished |
-| ML performance | Accuracy 80%, QWK 80% | Reported as accomplished |
+| ML performance | Accuracy 80%, QWK 80% | Not accomplished for lack of data |
 | Sampling frequency | Establish via FFT | 50 Hz reported |
-
-These values come from the project information supplied with the repository context and should be cross-checked against raw logs or plots before final submission if stricter reproducibility is required.
 
 ### Methodology Notes
 
