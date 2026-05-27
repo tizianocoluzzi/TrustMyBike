@@ -358,9 +358,4 @@ A complete demonstration can be organized as follows:
 4. Observe GPS, BLE status, and road-quality indicator in the dashboard.
 5. Generate enough data points to trigger batch publication to MQTT.
 
----
-
-### Concept History
-
-- Previous version: [INSERT LINK TO PREVIOUS DOCUMENT VERSION]
 
